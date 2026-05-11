@@ -18,6 +18,7 @@
           type="text"
           placeholder="Proceso A"
           maxlength="20"
+          @keydown.enter="handleAdd"
           class="flex-1 bg-gray-800 text-xs px-2 py-1 rounded border border-gray-700 focus:border-blue-500 outline-none text-gray-200"
         />
       </div>

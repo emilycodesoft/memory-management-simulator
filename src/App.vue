@@ -20,7 +20,6 @@
             <ConfigPanel class="bg-gray-900 rounded p-3" />
             <ProcessManager class="bg-gray-900 rounded p-3" />
             <InstructionInput class="bg-gray-900 rounded p-3" />
-            <StepPanel v-if="store.stepper.running" class="mt-0" />
           </div>
         </section>
 
@@ -47,7 +46,7 @@
           </header>
           
           <!-- CPU / MMU -->
-          <div class="bg-gray-800 p-4 rounded-lg border border-violet-900/50 shadow-inner">
+          <div id="section-tlb" class="bg-gray-800 p-4 rounded-lg border border-violet-900/50 shadow-inner">
              <h3 class="text-violet-400 font-bold mb-3 text-sm flex items-center gap-2">
                🧠 CPU / MMU (Memory Management Unit)
              </h3>
@@ -60,11 +59,11 @@
                🖥️ Memoria Principal (RAM Física)
              </h3>
              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-               <div>
+               <div id="section-pagetable">
                  <p class="text-xs text-gray-500 mb-1 ml-1">Estructuras del SO en RAM:</p>
                  <PageTableView class="bg-gray-900 rounded p-3 border border-gray-700 h-full" />
                </div>
-               <div>
+               <div id="section-ram">
                  <p class="text-xs text-gray-500 mb-1 ml-1">Arreglo de Marcos (Frames):</p>
                  <PhysicalMemoryView class="bg-gray-900 rounded p-3 border border-gray-700 h-full" />
                </div>
@@ -72,7 +71,7 @@
           </div>
 
           <!-- Almacenamiento Secundario (Disco) -->
-          <div class="bg-gray-800 p-4 rounded-lg border border-orange-900/50 shadow-inner">
+          <div id="section-disk" class="bg-gray-800 p-4 rounded-lg border border-orange-900/50 shadow-inner">
             <h3 class="text-orange-400 font-bold mb-3 text-sm flex items-center gap-2">
               💾 Almacenamiento Secundario (Disco / Swap)
             </h3>
@@ -95,9 +94,29 @@
     </section>
 
   </div>
+
+  <!-- Panel flotante paso a paso -->
+  <Teleport to="body">
+    <Transition
+      enter-active-class="transition-all duration-300 ease-out"
+      enter-from-class="opacity-0 translate-y-4 scale-95"
+      enter-to-class="opacity-100 translate-y-0 scale-100"
+      leave-active-class="transition-all duration-200 ease-in"
+      leave-from-class="opacity-100 translate-y-0 scale-100"
+      leave-to-class="opacity-0 translate-y-4 scale-95"
+    >
+      <div
+        v-if="store.stepper.running"
+        class="fixed bottom-6 right-6 w-96 z-50 rounded-2xl shadow-2xl shadow-black/60 ring-1 ring-white/10"
+      >
+        <StepPanel />
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
+import { watch } from 'vue'
 import { useSimulatorStore } from './stores/simulator'
 const store = useSimulatorStore()
 
@@ -111,4 +130,21 @@ import TLBView from './components/TLBView.vue'
 import ExecutionLog from './components/ExecutionLog.vue'
 import DiskView from './components/DiskView.vue'
 import StepPanel from './components/StepPanel.vue'
+
+const SUBSYSTEM_IDS = {
+  tlb: 'section-tlb',
+  pagetable: 'section-pagetable',
+  ram: 'section-ram',
+  disk: 'section-disk',
+}
+
+watch(() => store.activeSubsystem, (subsystem) => {
+  if (!subsystem) return
+  const id = SUBSYSTEM_IDS[subsystem]
+  if (id) {
+    setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 80)
+  }
+})
 </script>

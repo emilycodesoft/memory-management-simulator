@@ -23,10 +23,26 @@ watch(processes, (procs) => {
   }
 }, { deep: false })
 
-// TODO: sincronización con instrucción ejecutada
-// Implementa aquí 4-5 líneas que decidan si la tabla sigue automáticamente
-// al proceso de la última instrucción, o se queda fija hasta que el usuario
-// elija manualmente.
+// Sincronización automática: seguir al proceso de la instrucción activa.
+// En modo stepper: _processId desde el inicio del paso.
+// En modo normal: último proceso en el log (excluye CONTEXT_SWITCH).
+const activeInstructionProcess = computed(() => {
+  if (store.stepper.running && store.stepper._processId !== null) {
+    return store.stepper._processId
+  }
+  for (let i = executionLog.value.length - 1; i >= 0; i--) {
+    if (executionLog.value[i].result !== 'CONTEXT_SWITCH') {
+      return executionLog.value[i].processId
+    }
+  }
+  return null
+})
+
+watch(activeInstructionProcess, (newId) => {
+  if (newId !== null && processes.value.find(p => p.id === newId)) {
+    selectedProcessId.value = newId
+  }
+})
 
 const selectedProcess = computed(() =>
   processes.value.find(p => p.id === selectedProcessId.value) ?? null,
