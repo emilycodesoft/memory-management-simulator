@@ -20,6 +20,7 @@
             <ConfigPanel class="bg-gray-900 rounded p-3" />
             <ProcessManager class="bg-gray-900 rounded p-3" />
             <InstructionInput class="bg-gray-900 rounded p-3" />
+            <StepPanel v-if="store.stepper.running" class="mt-0" />
           </div>
         </section>
 
@@ -97,6 +98,9 @@
 </template>
 
 <script setup>
+import { useSimulatorStore } from './stores/simulator'
+const store = useSimulatorStore()
+
 import ConfigPanel from './components/ConfigPanel.vue'
 import ProcessManager from './components/ProcessManager.vue'
 import InstructionInput from './components/InstructionInput.vue'
@@ -106,4 +110,5 @@ import PageTableView from './components/PageTableView.vue'
 import TLBView from './components/TLBView.vue'
 import ExecutionLog from './components/ExecutionLog.vue'
 import DiskView from './components/DiskView.vue'
+import StepPanel from './components/StepPanel.vue'
 </script>

@@ -6,6 +6,8 @@ import { useSimulatorStore } from '../stores/simulator'
 const store = useSimulatorStore()
 const { disk, processes } = storeToRefs(store)
 
+const isActive = computed(() => store.activeSubsystem === 'disk')
+
 const PROCESS_COLORS = [
   { border: 'border-blue-500/60',   bg: 'bg-blue-500/10',   text: 'text-blue-300',   dot: 'bg-blue-400'   },
   { border: 'border-violet-500/60', bg: 'bg-violet-500/10', text: 'text-violet-300', dot: 'bg-violet-400' },
@@ -38,7 +40,10 @@ function processName(processId) {
 </script>
 
 <template>
-  <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+  <div
+    class="bg-gray-900 rounded-xl border overflow-hidden transition-all duration-300"
+    :class="isActive ? 'border-orange-400/60 shadow-lg shadow-orange-500/20' : 'border-gray-700'"
+  >
 
     <!-- Encabezado -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800">
@@ -85,12 +90,17 @@ function processName(processId) {
     <div v-else class="p-4 grid grid-cols-4 gap-2">
       <div
         v-for="entry in sortedDisk"
-        :key="`${entry.processId}-${entry.vpn}`"
+        :key="`${entry.processId}-${entry.vpn}-${store.stepper.animationKey}`"
         class="relative rounded-lg border p-2.5 transition-all duration-300 min-h-[82px] flex flex-col justify-between"
         :class="[
           processColor(entry.processId).border,
           processColor(entry.processId).bg,
           isLatest(entry) ? 'ring-2 ring-white/25 scale-[1.04] shadow-lg shadow-black/40 z-10' : '',
+          isActive && store.stepper._isSwapIn
+            && entry.processId === store.stepper._processId
+            && entry.vpn === store.stepper._vpn
+            ? 'ring-2 ring-sky-400/70 scale-[1.04] shadow-sky-500/20 z-10'
+            : '',
         ]"
       >
         <!-- Origen (inicial o tick de desalojo) + pulso -->
@@ -127,6 +137,15 @@ function processName(processId) {
           </template>
         </div>
       </div>
+    </div>
+
+    <!-- Indicador activo -->
+    <div
+      v-if="isActive"
+      class="px-4 py-1.5 bg-orange-500/10 border-t border-orange-500/20 text-[10px] text-orange-400 font-mono flex items-center gap-1.5"
+    >
+      <span class="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+      {{ store.stepper._isSwapIn ? 'VPN encontrada en disco → swap-in' : 'Verificando disco...' }}
     </div>
 
     <!-- Pie: leyenda dirty bit en disco -->

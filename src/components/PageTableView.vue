@@ -6,6 +6,14 @@ import { useSimulatorStore } from '../stores/simulator'
 const store = useSimulatorStore()
 const { processes, executionLog, tick } = storeToRefs(store)
 
+const isActive = computed(() => store.activeSubsystem === 'pagetable')
+
+function isStepVpn(vpn) {
+  return isActive.value
+    && store.stepper._vpn === vpn
+    && store.stepper._processId === selectedProcessId.value
+}
+
 const selectedProcessId = ref(processes.value[0]?.id ?? null)
 
 // Mantener selectedProcessId válido cuando la lista de procesos cambia.
@@ -45,7 +53,10 @@ function isLastAccessed(vpn) {
 </script>
 
 <template>
-  <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+  <div
+    class="bg-gray-900 rounded-xl border overflow-hidden transition-all duration-300"
+    :class="isActive ? 'border-cyan-400/60 shadow-lg shadow-cyan-500/20' : 'border-gray-700'"
+  >
 
     <!-- Encabezado con selector de proceso -->
     <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-700 bg-gray-800">
@@ -92,11 +103,12 @@ function isLastAccessed(vpn) {
         <tbody>
           <tr
             v-for="entry in selectedProcess.pageTable"
-            :key="entry.vpn"
+            :key="`${entry.vpn}-${store.stepper.animationKey}`"
             class="border-b border-gray-800/60 transition-colors duration-150"
             :class="[
               rowClass(entry),
               isLastAccessed(entry.vpn) ? 'outline outline-1 outline-indigo-500/40' : '',
+              isStepVpn(entry.vpn) ? 'outline outline-2 outline-cyan-400/60 bg-cyan-500/5' : '',
             ]"
           >
             <!-- VPN -->
@@ -162,6 +174,15 @@ function isLastAccessed(vpn) {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Indicador activo -->
+    <div
+      v-if="isActive"
+      class="px-4 py-1.5 bg-cyan-500/10 border-t border-cyan-500/20 text-[10px] text-cyan-400 font-mono flex items-center gap-1.5"
+    >
+      <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+      Consultando tabla de páginas — VPN {{ store.stepper._vpn }}
     </div>
 
     <!-- Pie: leyenda de estados -->

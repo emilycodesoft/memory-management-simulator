@@ -63,12 +63,30 @@
         </div>
       </div>
 
+      <!-- Toggle: modo paso a paso -->
+      <div class="flex items-center justify-between pt-1">
+        <label class="text-xs text-gray-400">Modo paso a paso</label>
+        <button
+          type="button"
+          @click="store.toggleStepper()"
+          :disabled="store.stepper.running"
+          class="relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none disabled:opacity-50"
+          :class="store.stepper.active ? 'bg-blue-600' : 'bg-gray-700'"
+          :title="store.stepper.active ? 'Desactivar modo paso a paso' : 'Activar modo paso a paso'"
+        >
+          <span
+            class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-200"
+            :class="store.stepper.active ? 'left-5' : 'left-0.5'"
+          />
+        </button>
+      </div>
+
       <button
         @click="handleExecute"
-        :disabled="!!addressError || !rawAddress.trim()"
+        :disabled="!!addressError || !rawAddress.trim() || store.stepper.running"
         class="w-full bg-blue-700 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold py-1.5 rounded transition-colors"
       >
-        Ejecutar instrucción
+        {{ store.stepper.active ? 'Iniciar paso a paso' : 'Ejecutar instrucción' }}
       </button>
     </div>
 
@@ -130,8 +148,8 @@ function onAddressInput() {
 }
 
 function handleExecute() {
-  if (addressError.value || !rawAddress.value.trim()) return
-  store.executeInstruction(selectedProcessId.value, '0x' + rawAddress.value, operation.value)
+  if (addressError.value || !rawAddress.value.trim() || store.stepper.running) return
+  store.beginInstruction(selectedProcessId.value, '0x' + rawAddress.value, operation.value)
 }
 
 // Muestra el desglose VPN + offset mientras el usuario escribe

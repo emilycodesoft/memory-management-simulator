@@ -6,6 +6,8 @@ import { useSimulatorStore } from '../stores/simulator'
 const store = useSimulatorStore()
 const { tlb, processes, tick } = storeToRefs(store)
 
+const isActive = computed(() => store.activeSubsystem === 'tlb')
+
 // La última entrada añadida es la que tiene mayor lastAccessed.
 // En caso de empate (varias con el mismo tick), destacamos todas.
 const latestTick = computed(() =>
@@ -22,7 +24,12 @@ function isLatest(entry) {
 </script>
 
 <template>
-  <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+  <div
+    class="bg-gray-900 rounded-xl border overflow-hidden transition-all duration-300"
+    :class="isActive
+      ? 'border-indigo-400/60 shadow-lg shadow-indigo-500/20'
+      : 'border-gray-700'"
+  >
     <!-- Encabezado -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800">
       <div class="flex items-center gap-2">
@@ -67,11 +74,13 @@ function isLatest(entry) {
         <tbody>
           <tr
             v-for="(entry, idx) in tlb"
-            :key="`${entry.processId}-${entry.vpn}`"
+            :key="`${entry.processId}-${entry.vpn}-${store.stepper.animationKey}`"
             class="border-b border-gray-800 transition-colors duration-200"
-            :class="isLatest(entry)
-              ? 'bg-indigo-500/10 border-indigo-500/20'
-              : 'hover:bg-gray-800/50'"
+            :class="[
+              isLatest(entry) ? 'bg-indigo-500/10 border-indigo-500/20' : 'hover:bg-gray-800/50',
+              isActive ? 'animate-scan-row' : '',
+            ]"
+            :style="isActive ? { animationDelay: `${idx * 80}ms` } : {}"
           >
             <!-- Índice con indicador de "nueva" -->
             <td class="px-4 py-2.5 text-gray-600">
@@ -123,6 +132,15 @@ function isLatest(entry) {
       </table>
     </div>
 
+    <!-- Indicador activo -->
+    <div
+      v-if="isActive"
+      class="px-4 py-1.5 bg-indigo-500/10 border-t border-indigo-500/20 text-[10px] text-indigo-400 font-mono flex items-center gap-1.5"
+    >
+      <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+      Consultando TLB...
+    </div>
+
     <!-- Leyenda de política de reemplazo -->
     <div class="px-4 py-2 border-t border-gray-700/60 bg-gray-800/40">
       <p class="text-[10px] text-gray-600">
@@ -132,3 +150,14 @@ function isLatest(entry) {
     </div>
   </div>
 </template>
+
+<style scoped>
+@keyframes scan-row {
+  0%   { background-color: transparent; }
+  30%  { background-color: rgba(99, 102, 241, 0.15); }
+  100% { background-color: transparent; }
+}
+.animate-scan-row {
+  animation: scan-row 0.5s ease-out both;
+}
+</style>

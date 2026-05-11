@@ -6,6 +6,28 @@ import { useSimulatorStore } from '../stores/simulator'
 const store = useSimulatorStore()
 const { physicalMemory, processes, executionLog, tick } = storeToRefs(store)
 
+const isActive = computed(() => store.activeSubsystem === 'ram')
+
+function isStepTarget(frame) {
+  if (!isActive.value) return false
+  const s = store.stepper
+  const step = s.steps[s.currentIdx]
+  if (!step) return false
+  if (step.id === 'SELECT_FRAME_FREE') return frame.frameId === s._freeFrame
+  if (step.id === 'SELECT_FRAME_VICTIM' || step.id === 'EVICT') return frame.frameId === s._victim
+  if (step.id === 'LOAD_PAGE') return frame.frameId === s._pfn
+  return false
+}
+
+function stepTargetClass(frame) {
+  if (!isStepTarget(frame)) return ''
+  const step = store.stepper.steps[store.stepper.currentIdx]
+  if (!step) return ''
+  if (step.id === 'EVICT' || step.id === 'SELECT_FRAME_VICTIM') return 'ring-2 ring-red-400/70 shadow-red-500/30'
+  if (step.id === 'LOAD_PAGE') return 'ring-2 ring-emerald-400/70 shadow-emerald-500/30'
+  return 'ring-2 ring-blue-400/70 shadow-blue-500/30'
+}
+
 // Paleta de colores por proceso (índice = posición en el array processes[]).
 // Los IDs son incrementales, así que la asignación es estable durante la sesión.
 const PROCESS_COLORS = [
@@ -40,7 +62,10 @@ function isHighlighted(frame) {
 </script>
 
 <template>
-  <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+  <div
+    class="bg-gray-900 rounded-xl border overflow-hidden transition-all duration-300"
+    :class="isActive ? 'border-emerald-400/60 shadow-lg shadow-emerald-500/20' : 'border-gray-700'"
+  >
 
     <!-- Encabezado -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800">
@@ -79,7 +104,7 @@ function isHighlighted(frame) {
     <div class="p-4 grid grid-cols-4 gap-2">
       <div
         v-for="frame in physicalMemory"
-        :key="frame.frameId"
+        :key="`${frame.frameId}-${store.stepper.animationKey}`"
         class="relative rounded-lg border p-2.5 transition-all duration-300 min-h-[82px] flex flex-col justify-between"
         :class="[
           frame.processId !== null
@@ -87,6 +112,9 @@ function isHighlighted(frame) {
             : 'border-gray-700/50 bg-gray-800/30',
           isHighlighted(frame)
             ? 'ring-2 ring-white/25 scale-[1.04] shadow-lg shadow-black/40 z-10'
+            : '',
+          stepTargetClass(frame)
+            ? [stepTargetClass(frame), 'scale-[1.04] shadow-lg z-10']
             : '',
         ]"
       >
@@ -127,6 +155,15 @@ function isHighlighted(frame) {
           </template>
         </div>
       </div>
+    </div>
+
+    <!-- Indicador activo -->
+    <div
+      v-if="isActive"
+      class="px-4 py-1.5 bg-emerald-500/10 border-t border-emerald-500/20 text-[10px] text-emerald-400 font-mono flex items-center gap-1.5"
+    >
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+      {{ store.stepper.steps[store.stepper.currentIdx]?.label ?? 'RAM activa' }}
     </div>
 
     <!-- Pie: leyenda dirty bit -->
