@@ -103,7 +103,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useSimulatorStore } from '../stores/simulator'
 
 const store = useSimulatorStore()
@@ -116,15 +116,21 @@ const local = ref({
   pageFaultPenalty: store.config.pageFaultPenalty,
 })
 
-const started = ref(false)
+const started = computed(() => store.simulationStarted)
 
 function startSimulation() {
   store.updateConfig({ ...local.value })
-  started.value = true
+  store.startSimulation()
 }
 
 function reset() {
   store.resetSimulator()
-  started.value = false
+  local.value = {
+    frameCount: store.config.frameCount,
+    tlbSize: store.config.tlbSize,
+    algorithm: store.config.algorithm,
+    tlbMissPenalty: store.config.tlbMissPenalty,
+    pageFaultPenalty: store.config.pageFaultPenalty,
+  }
 }
 </script>

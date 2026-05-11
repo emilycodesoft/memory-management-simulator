@@ -25,6 +25,7 @@ export const useSimulatorStore = defineStore('simulator', {
     tlb: [],
     disk: [],
     currentProcessId: null,
+    simulationActive: false,
     metrics: {
       tlbHits: 0,
       tlbMisses: 0,
@@ -65,7 +66,7 @@ export const useSimulatorStore = defineStore('simulator', {
   }),
 
   getters: {
-    simulationStarted: (state) => state.tick > 0,
+    simulationStarted: (state) => state.simulationActive,
     freeFrameCount: (state) => state.physicalMemory.filter(f => f.processId === null).length,
     activeSubsystem: (state) => {
       if (!state.stepper.running) return null
@@ -305,6 +306,10 @@ export const useSimulatorStore = defineStore('simulator', {
     },
 
     // ─── Acciones públicas ─────────────────────────────────────────────────
+
+    startSimulation() {
+      this.simulationActive = true
+    },
 
     toggleStepper() {
       if (this.stepper.running) this.completeAllSteps()
@@ -777,6 +782,7 @@ export const useSimulatorStore = defineStore('simulator', {
       this.tlb = []
       this.disk = []
       this.currentProcessId = null
+      this.simulationActive = false
       this.metrics = { tlbHits: 0, tlbMisses: 0, pageFaults: 0, totalAccesses: 0, hitRate: 0, swapOuts: 0, swapIns: 0 }
       this.executionLog = []
       this.tick = 0

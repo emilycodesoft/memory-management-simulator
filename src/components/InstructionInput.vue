@@ -2,7 +2,11 @@
   <div>
     <h2 class="font-semibold text-sm text-gray-300 mb-3">Ejecutar instrucción</h2>
 
-    <p v-if="store.processes.length === 0" class="text-xs text-gray-500">
+    <p v-if="!store.simulationStarted" class="text-xs text-gray-500">
+      Inicia la simulación en el panel de configuración para ejecutar instrucciones.
+    </p>
+
+    <p v-else-if="store.processes.length === 0" class="text-xs text-gray-500">
       Crea al menos un proceso para ejecutar instrucciones.
     </p>
 
