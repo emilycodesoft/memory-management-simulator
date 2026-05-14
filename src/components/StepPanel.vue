@@ -2,11 +2,13 @@
 import { storeToRefs } from 'pinia'
 import { useSimulatorStore } from '../stores/simulator'
 import { useProcessLabel } from '../composables/useProcessLabel'
+import { useStepControls } from '../composables/useStepControls'
 import { STEP_TYPE_STYLES } from '../constants'
 
 const store = useSimulatorStore()
 const { stepper } = storeToRefs(store)
 const { processName } = useProcessLabel()
+const { canAdvance, canGoBack, isLastStep } = useStepControls()
 
 function typeStyle(type) {
   return STEP_TYPE_STYLES[type] ?? STEP_TYPE_STYLES.info
@@ -17,13 +19,6 @@ function stepStatus(idx) {
   if (idx === stepper.value.currentIdx) return 'active'
   return 'pending'
 }
-
-// canAdvance, canGoBack, isLastStep — duplicados de StepIsland.
-// TODO: migrar a useStepControls() cuando esté implementado.
-import { computed } from 'vue'
-const canAdvance = computed(() => stepper.value.running)
-const canGoBack  = computed(() => stepper.value.running && stepper.value.currentIdx > 0)
-const isLastStep = computed(() => stepper.value.currentIdx === stepper.value.steps.length - 1)
 </script>
 
 <template>
