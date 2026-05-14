@@ -82,28 +82,11 @@
       </div>
     </fieldset>
 
-    <!-- Botones de acción -->
-    <div class="mt-4">
-      <button
-        v-if="!started"
-        @click="startSimulation"
-        class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-semibold py-2 rounded transition-colors"
-      >
-        Iniciar simulación
-      </button>
-      <button
-        v-else
-        @click="reset"
-        class="w-full bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-2 rounded transition-colors"
-      >
-        Reiniciar simulación
-      </button>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useSimulatorStore } from '../stores/simulator'
 
 const store = useSimulatorStore()
@@ -118,19 +101,21 @@ const local = ref({
 
 const started = computed(() => store.simulationStarted)
 
-function startSimulation() {
-  store.updateConfig({ ...local.value })
-  store.startSimulation()
-}
+// Aplica la config al store en tiempo real mientras no haya iniciado la simulación
+watch(local, (val) => {
+  store.updateConfig({ ...val })
+}, { deep: true })
 
-function reset() {
-  store.resetSimulator()
-  local.value = {
-    frameCount: store.config.frameCount,
-    tlbSize: store.config.tlbSize,
-    algorithm: store.config.algorithm,
-    tlbMissPenalty: store.config.tlbMissPenalty,
-    pageFaultPenalty: store.config.pageFaultPenalty,
+// Sincronizar local si el store se reinicia
+watch(() => store.simulationActive, (active) => {
+  if (!active) {
+    local.value = {
+      frameCount: store.config.frameCount,
+      tlbSize: store.config.tlbSize,
+      algorithm: store.config.algorithm,
+      tlbMissPenalty: store.config.tlbMissPenalty,
+      pageFaultPenalty: store.config.pageFaultPenalty,
+    }
   }
-}
+})
 </script>

@@ -2,11 +2,12 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSimulatorStore } from '../stores/simulator'
-
+import { useProcessLabel } from '../composables/useProcessLabel'
+import { useSubsystemActive } from '../composables/useSubsystemActive'
 const store = useSimulatorStore()
 const { physicalMemory, processes, executionLog, tick } = storeToRefs(store)
-
-const isActive = computed(() => store.activeSubsystem === 'ram')
+const { isActive } = useSubsystemActive('ram')
+const { processName, processColor } = useProcessLabel()
 
 function isStepTarget(frame) {
   if (!isActive.value) return false
@@ -28,17 +29,6 @@ function stepTargetClass(frame) {
   return 'ring-2 ring-blue-400/70 shadow-blue-500/30'
 }
 
-// Paleta de colores por proceso (índice = posición en el array processes[]).
-// Los IDs son incrementales, así que la asignación es estable durante la sesión.
-const PROCESS_COLORS = [
-  { border: 'border-blue-500/60',   bg: 'bg-blue-500/10',   text: 'text-blue-300',   dot: 'bg-blue-400'   },
-  { border: 'border-violet-500/60', bg: 'bg-violet-500/10', text: 'text-violet-300', dot: 'bg-violet-400' },
-  { border: 'border-amber-500/60',  bg: 'bg-amber-500/10',  text: 'text-amber-300',  dot: 'bg-amber-400'  },
-  { border: 'border-rose-500/60',   bg: 'bg-rose-500/10',   text: 'text-rose-300',   dot: 'bg-rose-400'   },
-  { border: 'border-teal-500/60',   bg: 'bg-teal-500/10',   text: 'text-teal-300',   dot: 'bg-teal-400'   },
-  { border: 'border-orange-500/60', bg: 'bg-orange-500/10', text: 'text-orange-300', dot: 'bg-orange-400' },
-]
-
 // Marco afectado por la última instrucción real (excluye context switch).
 const lastAffectedFrame = computed(() => {
   const last = [...executionLog.value]
@@ -46,15 +36,6 @@ const lastAffectedFrame = computed(() => {
     .find(e => e.frameAssigned !== null && e.result !== 'CONTEXT_SWITCH')
   return last?.frameAssigned ?? null
 })
-
-function processColor(processId) {
-  const idx = processes.value.findIndex(p => p.id === processId)
-  return PROCESS_COLORS[idx % PROCESS_COLORS.length] ?? PROCESS_COLORS[0]
-}
-
-function processName(processId) {
-  return processes.value.find(p => p.id === processId)?.name ?? `P${processId}`
-}
 
 function isHighlighted(frame) {
   return tick.value > 0 && frame.frameId === lastAffectedFrame.value

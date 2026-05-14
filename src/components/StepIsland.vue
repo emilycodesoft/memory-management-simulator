@@ -2,28 +2,18 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSimulatorStore } from '../stores/simulator'
+import { useStepControls } from '../composables/useStepControls'
+import { STEP_TYPE_STYLES } from '../constants'
 
 const store = useSimulatorStore()
 const { stepper } = storeToRefs(store)
+const { currentStep, isLastStepStep, canAdvance, canGoBack } = useStepControls()
 
-const currentStep = computed(() => stepper.value.steps[stepper.value.currentIdx] ?? null)
 const total = computed(() => stepper.value.steps.length)
 const idx = computed(() => stepper.value.currentIdx)
-const isLast = computed(() => idx.value === total.value - 1)
-const canAdvance = computed(() => stepper.value.running)
-const canGoBack = computed(() => stepper.value.running && idx.value > 0)
-
-const TYPE_STYLE = {
-  hit:    { bar: 'bg-emerald-500', text: 'text-emerald-300', badge: 'bg-emerald-500/15 border-emerald-500/30' },
-  miss:   { bar: 'bg-yellow-500',  text: 'text-yellow-300',  badge: 'bg-yellow-500/15 border-yellow-500/30'  },
-  fault:  { bar: 'bg-red-500',     text: 'text-red-300',     badge: 'bg-red-500/15 border-red-500/30'        },
-  error:  { bar: 'bg-red-700',     text: 'text-red-400',     badge: 'bg-red-900/20 border-red-800/40'        },
-  switch: { bar: 'bg-gray-500',    text: 'text-gray-400',    badge: 'bg-gray-700/30 border-gray-600/40'      },
-  info:   { bar: 'bg-blue-500',    text: 'text-blue-300',    badge: 'bg-blue-500/15 border-blue-500/30'      },
-}
 
 function style(type) {
-  return TYPE_STYLE[type] ?? TYPE_STYLE.info
+  return STEP_TYPE_STYLES[type] ?? STEP_TYPE_STYLES.info
 }
 </script>
 
@@ -76,11 +66,11 @@ function style(type) {
         @click="store.advanceStep()"
         :disabled="!canAdvance"
         class="flex-1 text-xs font-semibold py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        :class="isLast
+        :class="isLastStep
           ? 'bg-emerald-700 hover:bg-emerald-600 text-white'
           : 'bg-blue-700 hover:bg-blue-600 text-white'"
       >
-        {{ isLast ? 'Finalizar ✓' : 'Siguiente →' }}
+        {{ isLastStep ? 'Finalizar ✓' : 'Siguiente →' }}
       </button>
 
       <button

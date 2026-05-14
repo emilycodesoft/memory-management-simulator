@@ -1,15 +1,7 @@
 import { defineStore } from 'pinia'
-
-function makePhysicalMemory(frameCount) {
-  return Array.from({ length: frameCount }, (_, i) => ({
-    frameId: i,
-    processId: null,
-    vpn: null,
-    dirty: false,
-    loadedAt: 0,
-    lastAccessed: 0,
-  }))
-}
+import { makePhysicalMemory, selectVictim } from '../utils/memory'
+import { parseAddress } from '../utils/address'
+import { buildSteps } from '../utils/stepBuilder'
 
 export const useSimulatorStore = defineStore('simulator', {
   state: () => ({
@@ -73,8 +65,10 @@ export const useSimulatorStore = defineStore('simulator', {
       const step = state.stepper.steps[state.stepper.currentIdx]
       if (!step) return null
       const map = {
-        TLB_LOOKUP: 'tlb', APPLY_HIT: 'tlb', UPDATE_TLB: 'tlb',
-        PAGE_TABLE: 'pagetable', PAGE_TABLE_FAULT: 'pagetable', APPLY_MISS: 'pagetable',
+        CONTEXT_SWITCH: 'instruction',
+        PARSE: 'tlb',
+        TLB_LOOKUP: 'tlb', APPLY_HIT: 'tlb', UPDATE_TLB: 'tlb', APPLY_MISS: 'tlb',
+        PAGE_TABLE: 'pagetable', PAGE_TABLE_FAULT: 'pagetable',
         CHECK_DISK: 'disk',
         SELECT_FRAME_FREE: 'ram', SELECT_FRAME_VICTIM: 'ram', EVICT: 'ram', LOAD_PAGE: 'ram',
       }
@@ -84,13 +78,6 @@ export const useSimulatorStore = defineStore('simulator', {
 
   actions: {
     // ─── Helpers internos ──────────────────────────────────────────────────
-
-    // Divide la dirección virtual en VPN (número de página) y offset.
-    // Con páginas de 4 KB: los 12 bits bajos son el offset, el resto es el VPN.
-    _parseAddress(virtualAddress) {
-      const addr = parseInt(virtualAddress, 16)
-      return { vpn: addr >>> 12, offset: addr & 0xFFF }
-    },
 
     // Devuelve la entrada TLB para (processId, vpn) o null si no existe.
     _tlbLookup(processId, vpn) {
@@ -114,16 +101,6 @@ export const useSimulatorStore = defineStore('simulator', {
         this.tlb.splice(lruIdx, 1)
       }
       this.tlb.push({ vpn, pfn, processId, lastAccessed: this.tick })
-    },
-
-    // Elige el marco víctima para reemplazo según el algoritmo configurado.
-    // FIFO: el que lleva más tiempo en memoria (menor loadedAt).
-    // LRU:  el que no se usa hace más tiempo (menor lastAccessed).
-    _selectVictim() {
-      const occupied = this.physicalMemory.filter(f => f.processId !== null)
-      return this.config.algorithm === 'FIFO'
-        ? occupied.reduce((min, f) => (f.loadedAt < min.loadedAt ? f : min))
-        : occupied.reduce((min, f) => (f.lastAccessed < min.lastAccessed ? f : min))
     },
 
     // Recalcula hitRate a partir de los contadores acumulados.
@@ -286,14 +263,14 @@ export const useSimulatorStore = defineStore('simulator', {
           } else {
             this.executionLog.push({
               ...baseLog, result: 'PAGE_FAULT', frameAssigned: s._pfn, victimVpn: s._victimVpn,
-              swapIn: s._isSwapIn,
+              tlbMiss: true, swapIn: s._isSwapIn, swapOut: s._victimVpn !== null,
               detail: (() => {
                 if (s._isSwapIn && s._victimVpn !== null)
                   return `PAGE FAULT (swap-in): VPN ${s._vpn} recuperada del disco. Víctima VPN ${s._victimVpn} desalojada del marco ${s._pfn}.`
                 if (s._isSwapIn)
                   return `PAGE FAULT (swap-in): VPN ${s._vpn} recuperada del disco. Marco libre ${s._pfn} asignado.`
                 if (s._victimVpn !== null)
-                  return `PAGE FAULT (carga inicial): VPN ${s._vpn} no estaba en RAM ni en disco. Víctima VPN ${s._victimVpn} desalojada del marco ${s._pfn}.`
+                  return `PAGE FAULT (carga inicial): VPN ${s._vpn} no estaba en RAM ni en disco. Víctima VPN ${s._victimVpn} desalojada ("swap out") del marco ${s._pfn}.`
                 return `PAGE FAULT (carga inicial): VPN ${s._vpn} no estaba en RAM ni en disco. Marco libre ${s._pfn} asignado.`
               })(),
             })
@@ -332,197 +309,23 @@ export const useSimulatorStore = defineStore('simulator', {
         return
       }
 
+      const { steps, meta } = buildSteps({
+        processId, virtualAddress, operation,
+        currentProcessId: this.currentProcessId,
+        processes: this.processes,
+        tlb: this.tlb,
+        physicalMemory: this.physicalMemory,
+        disk: this.disk,
+        config: this.config,
+        tick: this.tick,
+      })
+
       const s = this.stepper
-      const steps = []
-
-      s._processId = processId
-      s._virtualAddress = virtualAddress
-      s._operation = operation
-      s._permissionError = null
-      s._tlbHit = false
-      s._pageValid = false
-      s._pfn = null
-      s._isSwapIn = false
-      s._diskIdx = -1
-      s._freeFrame = null
-      s._victim = null
-      s._victimVpn = null
-      s._victimProcessId = null
-      s._victimDirty = false
-
-      // Paso 1 — cambio de contexto
-      s._isContextSwitch = processId !== this.currentProcessId
-      if (s._isContextSwitch) {
-        steps.push({
-          id: 'CONTEXT_SWITCH',
-          label: 'Cambio de contexto',
-          detail: `Proceso ${this.currentProcessId ?? '–'} → proceso ${processId}. TLB se vaciará.`,
-          type: 'switch',
-        })
-      }
-
-      // Paso 2 — parsear dirección
-      const { vpn, offset } = this._parseAddress(virtualAddress)
-      s._vpn = vpn
-      s._offset = offset
-      steps.push({
-        id: 'PARSE',
-        label: 'Parsear dirección',
-        detail: `${virtualAddress} → VPN ${vpn}, offset 0x${offset.toString(16).toUpperCase().padStart(3, '0')}`,
-        type: 'info',
-      })
-
-      // Paso 3 — verificar permisos
-      const process = this.processes.find(p => p.id === processId)
-      const pageEntry = process?.pageTable.find(p => p.vpn === vpn)
-      if (!process) {
-        s._permissionError = `Proceso ${processId} no encontrado.`
-      } else if (!pageEntry) {
-        s._permissionError = `VPN ${vpn} no existe en la tabla de páginas del proceso ${processId}.`
-      } else if (operation === 'W' && pageEntry.permissions === 'R') {
-        s._permissionError = `Acceso denegado: VPN ${vpn} es de solo lectura (proceso ${processId}).`
-      }
-      if (s._permissionError) {
-        steps.push({ id: 'PERMISSIONS', label: 'Verificar permisos', detail: s._permissionError, type: 'error' })
-        s.steps = steps
-        s.currentIdx = 0
-        s.animationKey++
-        s._snapshots = []
-        s._snapshots[0] = this._takeSnapshot()
-        s.running = true
-        this._applyStep(steps[0])
-        return
-      }
-      steps.push({
-        id: 'PERMISSIONS',
-        label: 'Verificar permisos',
-        detail: `VPN ${vpn}: permisos OK (${pageEntry.permissions}${operation === 'W' ? ', escritura permitida' : ''}).`,
-        type: 'hit',
-      })
-
-      // Paso 4 — buscar en TLB
-      // _tlbLookup filtra por processId, así que es correcto aunque haya context switch pendiente.
-      const tlbEntry = this._tlbLookup(processId, vpn)
-      s._tlbHit = !!tlbEntry
-
-      if (s._tlbHit) {
-        s._pfn = tlbEntry.pfn
-        steps.push({
-          id: 'TLB_LOOKUP',
-          label: 'Buscar en TLB',
-          detail: `TLB HIT: VPN ${vpn} → marco ${tlbEntry.pfn}. No se consulta la tabla de páginas.`,
-          type: 'hit',
-        })
-        steps.push({
-          id: 'APPLY_HIT',
-          label: 'Actualizar estado',
-          detail: `Actualizar lastAccessed en TLB y RAM.${operation === 'W' ? ' Marcar dirty (escritura).' : ''}`,
-          type: 'info',
-        })
-      } else {
-        steps.push({
-          id: 'TLB_LOOKUP',
-          label: 'Buscar en TLB',
-          detail: `TLB MISS: VPN ${vpn} no está en TLB. Consultando tabla de páginas...`,
-          type: 'miss',
-        })
-
-        s._pageValid = pageEntry.valid
-        if (pageEntry.valid) {
-          s._pfn = pageEntry.pfn
-          steps.push({
-            id: 'PAGE_TABLE',
-            label: 'Buscar en tabla de páginas',
-            detail: `VPN ${vpn} está en RAM → marco ${pageEntry.pfn}. Cargando traducción en TLB.`,
-            type: 'miss',
-          })
-          steps.push({
-            id: 'APPLY_MISS',
-            label: 'Cargar traducción en TLB',
-            detail: `Insertar VPN ${vpn} → marco ${pageEntry.pfn} en TLB.${operation === 'W' ? ' Marcar dirty.' : ''}`,
-            type: 'info',
-          })
-        } else {
-          steps.push({
-            id: 'PAGE_TABLE_FAULT',
-            label: 'Buscar en tabla de páginas',
-            detail: `VPN ${vpn} NO está en RAM (valid=false) → PAGE FAULT.`,
-            type: 'fault',
-          })
-
-          const diskIdx = this.disk.findIndex(d => d.processId === processId && d.vpn === vpn)
-          s._isSwapIn = diskIdx !== -1
-          s._diskIdx = diskIdx
-          steps.push({
-            id: 'CHECK_DISK',
-            label: 'Verificar disco',
-            detail: s._isSwapIn
-              ? `VPN ${vpn} encontrada en disco → swap-in (fue desalojada anteriormente).`
-              : `VPN ${vpn} no está en disco → carga inicial (primera vez en RAM).`,
-            type: s._isSwapIn ? 'hit' : 'info',
-          })
-
-          const freeFrame = this.physicalMemory.find(f => f.processId === null)
-          if (freeFrame) {
-            s._freeFrame = freeFrame.frameId
-            s._victim = null
-            s._pfn = freeFrame.frameId
-            steps.push({
-              id: 'SELECT_FRAME_FREE',
-              label: 'Seleccionar marco',
-              detail: `Marco libre disponible: F${freeFrame.frameId}. No se necesita desalojar ninguna página.`,
-              type: 'info',
-            })
-          } else {
-            const victim = this._selectVictim()
-            s._freeFrame = null
-            s._victim = victim.frameId
-            s._victimVpn = victim.vpn
-            s._victimProcessId = victim.processId
-            s._victimDirty = victim.dirty
-            s._pfn = victim.frameId
-            const victimProcName = this.processes.find(p => p.id === victim.processId)?.name ?? `P${victim.processId}`
-            steps.push({
-              id: 'SELECT_FRAME_VICTIM',
-              label: `Seleccionar víctima (${this.config.algorithm})`,
-              detail: `RAM llena. ${this.config.algorithm}: víctima VPN ${victim.vpn} de ${victimProcName} en marco F${victim.frameId}${victim.dirty ? ' (dirty → requiere escritura a disco)' : ' (clean → descarte gratis)'}.`,
-              type: 'fault',
-            })
-            steps.push({
-              id: 'EVICT',
-              label: 'Desalojar víctima',
-              detail: `Invalidar VPN ${victim.vpn} en tabla de páginas, eliminar de TLB, enviar a disco${victim.dirty ? ' (dirty)' : ' (clean)'}.`,
-              type: victim.dirty ? 'fault' : 'miss',
-            })
-          }
-
-          steps.push({
-            id: 'LOAD_PAGE',
-            label: 'Cargar página en RAM',
-            detail: `Asignar marco F${s._pfn} a VPN ${vpn}. Actualizar tabla de páginas (valid=true, pfn=${s._pfn}).`,
-            type: 'info',
-          })
-          steps.push({
-            id: 'UPDATE_TLB',
-            label: 'Actualizar TLB',
-            detail: `Insertar VPN ${vpn} → marco ${s._pfn} en TLB.${operation === 'W' ? ' Marcar dirty.' : ''}`,
-            type: 'info',
-          })
-        }
-      }
-
-      steps.push({
-        id: 'FINALIZE',
-        label: 'Finalizar instrucción',
-        detail: `Registrar resultado en log, incrementar tick (→ t${this.tick + 1}), recalcular hit rate.`,
-        type: 'info',
-      })
-
+      Object.assign(s, meta)
       s.steps = steps
       s.currentIdx = 0
       s.animationKey++
-      s._snapshots = []
-      s._snapshots[0] = this._takeSnapshot()
+      s._snapshots = [this._takeSnapshot()]
       s.running = true
       this._applyStep(steps[0])
     },
@@ -573,7 +376,7 @@ export const useSimulatorStore = defineStore('simulator', {
       }
 
       // ── Paso 2: parsear dirección virtual ─────────────────────────────
-      const { vpn, offset } = this._parseAddress(virtualAddress)
+      const { vpn, offset } = parseAddress(virtualAddress)
 
       // ── Paso 3: verificar permisos ─────────────────────────────────────
       const process = this.processes.find(p => p.id === processId)
@@ -688,7 +491,7 @@ export const useSimulatorStore = defineStore('simulator', {
             freeFrame.lastAccessed = this.tick
           } else {
             // 6b. Sin marcos libres — elegir víctima según algoritmo.
-            const victim = this._selectVictim()
+            const victim = selectVictim(this.physicalMemory, this.config.algorithm)
             victimVpn = victim.vpn
             pfn = victim.frameId
 
@@ -755,14 +558,14 @@ export const useSimulatorStore = defineStore('simulator', {
             result: 'PAGE_FAULT',
             frameAssigned: pfn,
             victimVpn,
-            swapIn: isSwapIn,
+            tlbMiss: true, swapIn: isSwapIn, swapOut: victimVpn !== null,
             detail: (() => {
               if (isSwapIn && victimVpn !== null)
                 return `PAGE FAULT (swap-in): VPN ${vpn} recuperada del disco. Víctima VPN ${victimVpn} desalojada del marco ${pfn}.`
               if (isSwapIn)
                 return `PAGE FAULT (swap-in): VPN ${vpn} recuperada del disco. Marco libre ${pfn} asignado.`
               if (victimVpn !== null)
-                return `PAGE FAULT (carga inicial): VPN ${vpn} no estaba en RAM ni en disco. Víctima VPN ${victimVpn} desalojada del marco ${pfn}.`
+                return `PAGE FAULT (carga inicial): VPN ${vpn} no estaba en RAM ni en disco. Víctima VPN ${victimVpn} desalojada ("swap out") del marco ${pfn}.`
               return `PAGE FAULT (carga inicial): VPN ${vpn} no estaba en RAM ni en disco. Marco libre ${pfn} asignado.`
             })(),
           })

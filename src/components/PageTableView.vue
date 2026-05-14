@@ -2,11 +2,11 @@
 import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSimulatorStore } from '../stores/simulator'
+import { useSubsystemActive } from '../composables/useSubsystemActive'
 
 const store = useSimulatorStore()
 const { processes, executionLog, tick } = storeToRefs(store)
-
-const isActive = computed(() => store.activeSubsystem === 'pagetable')
+const { isActive } = useSubsystemActive('pagetable')
 
 function isStepVpn(vpn) {
   return isActive.value

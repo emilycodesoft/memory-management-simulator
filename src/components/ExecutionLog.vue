@@ -2,48 +2,14 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSimulatorStore } from '../stores/simulator'
+import { useProcessLabel } from '../composables/useProcessLabel'
+import { RESULT_CONFIG } from '../constants'
 
 const store = useSimulatorStore()
-const { executionLog, processes } = storeToRefs(store)
+const { executionLog } = storeToRefs(store)
+const { processName } = useProcessLabel()
 
 const reversedLog = computed(() => [...executionLog.value].reverse())
-
-function processName(processId) {
-  return processes.value.find(p => p.id === processId)?.name ?? `P${processId}`
-}
-
-const RESULT_CONFIG = {
-  TLB_HIT: {
-    label: 'TLB HIT',
-    row: 'bg-emerald-500/5 hover:bg-emerald-500/10',
-    badge: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
-    dot: 'bg-emerald-400',
-  },
-  TLB_MISS: {
-    label: 'TLB MISS',
-    row: 'bg-yellow-500/5 hover:bg-yellow-500/10',
-    badge: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
-    dot: 'bg-yellow-400',
-  },
-  PAGE_FAULT: {
-    label: 'PAGE FAULT',
-    row: 'bg-red-500/5 hover:bg-red-500/10',
-    badge: 'bg-red-500/20 text-red-300 border border-red-500/30',
-    dot: 'bg-red-400',
-  },
-  CONTEXT_SWITCH: {
-    label: 'CTX SWITCH',
-    row: 'hover:bg-gray-800/50',
-    badge: 'bg-gray-600/30 text-gray-400 border border-gray-600/40',
-    dot: 'bg-gray-500',
-  },
-  PERMISSION_ERROR: {
-    label: 'PERM ERROR',
-    row: 'bg-red-900/10 hover:bg-red-900/20',
-    badge: 'bg-red-900/40 text-red-400 border border-red-800/50',
-    dot: 'bg-red-700',
-  },
-}
 
 function cfg(result) {
   return RESULT_CONFIG[result] ?? RESULT_CONFIG.CONTEXT_SWITCH
@@ -83,8 +49,8 @@ function cfg(result) {
     <!-- Lista con scroll — más reciente arriba -->
     <div v-else class="overflow-y-auto max-h-72 divide-y divide-gray-800/60">
       <div
-        v-for="entry in reversedLog"
-        :key="entry.tick"
+        v-for="(entry, i) in reversedLog"
+        :key="i"
         class="flex items-start gap-3 px-4 py-2.5 transition-colors duration-150"
         :class="cfg(entry.result).row"
       >
@@ -133,6 +99,14 @@ function cfg(result) {
               {{ cfg(entry.result).label }}
             </span>
 
+            <!-- Badge TLB MISS implícito en PAGE_FAULT -->
+            <span
+              v-if="entry.result === 'PAGE_FAULT' && entry.tlbMiss"
+              class="text-[9px] font-mono px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-400"
+            >
+              TLB MISS
+            </span>
+
             <!-- Sub-badge swap-in / carga inicial (solo en PAGE_FAULT) -->
             <span
               v-if="entry.result === 'PAGE_FAULT' && entry.swapIn !== undefined"
@@ -140,6 +114,14 @@ function cfg(result) {
               :class="entry.swapIn ? 'bg-sky-500/15 text-sky-400' : 'bg-gray-600/20 text-gray-500'"
             >
               {{ entry.swapIn ? 'swap-in' : 'inicial' }}
+            </span>
+
+            <!-- Badge swap-out cuando hubo desalojo de víctima -->
+            <span
+              v-if="entry.result === 'PAGE_FAULT' && entry.swapOut"
+              class="text-[9px] font-mono px-1 py-0.5 rounded bg-orange-500/15 text-orange-400"
+            >
+              swap-out
             </span>
 
             <!-- Marco asignado (si aplica) -->

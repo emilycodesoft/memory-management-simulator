@@ -96,7 +96,7 @@
 
     <!-- Resumen del último resultado -->
     <div
-      v-if="lastEntry"
+      v-if="lastEntry && !store.stepper.running"
       class="mt-3 border rounded p-2 text-[11px] font-mono"
       :class="resultBorderClass"
     >
@@ -117,8 +117,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useSimulatorStore } from '../stores/simulator'
+import { RESULT_CONFIG } from '../constants'
 
 const store = useSimulatorStore()
 
@@ -154,6 +155,12 @@ function onAddressInput() {
 function handleExecute() {
   if (addressError.value || !rawAddress.value.trim() || store.stepper.running) return
   store.beginInstruction(selectedProcessId.value, '0x' + rawAddress.value, operation.value)
+  // En modo directo (sin stepper) la instrucción ya terminó — hacer scroll de vuelta aquí
+  if (!store.stepper.active) {
+    nextTick(() => {
+      document.getElementById('section-instruction')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }
 }
 
 // Muestra el desglose VPN + offset mientras el usuario escribe
@@ -172,13 +179,6 @@ const lastEntry = computed(() => {
   }
   return null
 })
-
-const RESULT_CONFIG = {
-  TLB_HIT:          { label: 'TLB HIT',       border: 'border-green-700',  text: 'text-green-400' },
-  TLB_MISS:         { label: 'TLB MISS',       border: 'border-yellow-600', text: 'text-yellow-400' },
-  PAGE_FAULT:       { label: 'PAGE FAULT',     border: 'border-red-700',    text: 'text-red-400' },
-  PERMISSION_ERROR: { label: 'ERROR PERMISO',  border: 'border-red-900',    text: 'text-red-600' },
-}
 
 const resultBorderClass = computed(() =>
   lastEntry.value ? (RESULT_CONFIG[lastEntry.value.result]?.border ?? 'border-gray-700') + ' bg-gray-800' : ''

@@ -2,21 +2,19 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSimulatorStore } from '../stores/simulator'
+import { useProcessLabel } from '../composables/useProcessLabel'
+import { useSubsystemActive } from '../composables/useSubsystemActive'
 
 const store = useSimulatorStore()
-const { tlb, processes, tick } = storeToRefs(store)
-
-const isActive = computed(() => store.activeSubsystem === 'tlb')
+const { tlb, tick } = storeToRefs(store)
+const { isActive } = useSubsystemActive('tlb')
+const { processName } = useProcessLabel()
 
 // La última entrada añadida es la que tiene mayor lastAccessed.
 // En caso de empate (varias con el mismo tick), destacamos todas.
 const latestTick = computed(() =>
   tlb.value.length > 0 ? Math.max(...tlb.value.map(e => e.lastAccessed)) : -1,
 )
-
-function processName(processId) {
-  return processes.value.find(p => p.id === processId)?.name ?? `P${processId}`
-}
 
 function isLatest(entry) {
   return entry.lastAccessed === latestTick.value && tick.value > 0

@@ -1,26 +1,17 @@
 <script setup>
-import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSimulatorStore } from '../stores/simulator'
+import { useProcessLabel } from '../composables/useProcessLabel'
+import { useStepControls } from '../composables/useStepControls'
+import { STEP_TYPE_STYLES } from '../constants'
 
 const store = useSimulatorStore()
-const { stepper, processes } = storeToRefs(store)
-
-function processName(id) {
-  return processes.value.find(p => p.id === id)?.name ?? `P${id}`
-}
-
-const TYPE_STYLE = {
-  hit:    { dot: 'bg-emerald-400', text: 'text-emerald-300', active: 'bg-emerald-500/10 border-emerald-500/30' },
-  miss:   { dot: 'bg-yellow-400',  text: 'text-yellow-300',  active: 'bg-yellow-500/10 border-yellow-500/30'  },
-  fault:  { dot: 'bg-red-400',     text: 'text-red-300',     active: 'bg-red-500/10 border-red-500/30'        },
-  error:  { dot: 'bg-red-700',     text: 'text-red-500',     active: 'bg-red-900/20 border-red-800/40'        },
-  switch: { dot: 'bg-gray-500',    text: 'text-gray-400',    active: 'bg-gray-700/30 border-gray-600/40'      },
-  info:   { dot: 'bg-blue-400',    text: 'text-blue-300',    active: 'bg-blue-500/10 border-blue-500/30'      },
-}
+const { stepper } = storeToRefs(store)
+const { processName } = useProcessLabel()
+const { canAdvance, canGoBack, isLastStep } = useStepControls()
 
 function typeStyle(type) {
-  return TYPE_STYLE[type] ?? TYPE_STYLE.info
+  return STEP_TYPE_STYLES[type] ?? STEP_TYPE_STYLES.info
 }
 
 function stepStatus(idx) {
@@ -28,16 +19,6 @@ function stepStatus(idx) {
   if (idx === stepper.value.currentIdx) return 'active'
   return 'pending'
 }
-
-const canAdvance = computed(() => stepper.value.running)
-
-const canGoBack = computed(() =>
-  stepper.value.running && stepper.value.currentIdx > 0,
-)
-
-const isLastStep = computed(() =>
-  stepper.value.currentIdx === stepper.value.steps.length - 1,
-)
 </script>
 
 <template>
