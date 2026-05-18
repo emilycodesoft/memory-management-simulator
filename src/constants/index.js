@@ -41,6 +41,14 @@ export const RESULT_CONFIG = {
     border: 'border-red-900',
     text:   'text-red-600',
   },
+  SEGMENT_FAULT: {
+    label: 'SEG FAULT',
+    row:    'bg-orange-500/5 hover:bg-orange-500/10',
+    badge:  'bg-orange-500/20 text-orange-300 border border-orange-500/30',
+    dot:    'bg-orange-400',
+    border: 'border-orange-700',
+    text:   'text-orange-400',
+  },
 }
 
 // Estilos compartidos por tipo de paso del stepper.

@@ -1,4 +1,4 @@
-import { parseAddress } from './address'
+import { parseSegmentOffset } from './address'
 import { selectVictim } from './memory'
 
 // Recibe un snapshot del estado necesario para pre-computar los pasos,
@@ -7,15 +7,20 @@ import { selectVictim } from './memory'
 // steps: array de objetos { id, label, detail, type } para el stepper.
 // meta:  valores pre-computados (vpn, pfn, víctima, etc.) que _applyStep necesita.
 export function buildSteps({
-  processId, virtualAddress, operation,
+  processId, segmentId, addressInSegment, operation,
   currentProcessId, processes, tlb, physicalMemory, disk, config, tick,
 }) {
   const steps = []
+  const displayAddress = `S${segmentId}:${addressInSegment}`
 
   const meta = {
     _processId: processId,
-    _virtualAddress: virtualAddress,
+    _virtualAddress: displayAddress,
     _operation: operation,
+    _segmentId: segmentId,
+    _addressInSegment: addressInSegment,
+    _segmentEntry: null,
+    _segmentFault: null,
     _isContextSwitch: processId !== currentProcessId,
     _vpn: null,
     _offset: null,
@@ -42,40 +47,68 @@ export function buildSteps({
     })
   }
 
-  // Paso 2 — parsear dirección
-  const { vpn, offset } = parseAddress(virtualAddress)
-  meta._vpn = vpn
-  meta._offset = offset
+  // Paso 2 — parsear offset dentro del segmento
+  const { pageInSegment, byteOffset } = parseSegmentOffset(addressInSegment)
   steps.push({
     id: 'PARSE',
     label: 'Parsear dirección',
-    detail: `${virtualAddress} → VPN ${vpn}, offset 0x${offset.toString(16).toUpperCase().padStart(3, '0')}`,
+    detail: `${displayAddress} → página en segmento: ${pageInSegment}, offset: 0x${byteOffset.toString(16).toUpperCase().padStart(3, '0')}`,
     type: 'info',
   })
 
-  // Paso 3 — verificar permisos
+  // Paso 3 — verificar tabla de segmentos
   const process = processes.find(p => p.id === processId)
-  const pageEntry = process?.pageTable.find(p => p.vpn === vpn)
 
   if (!process) {
-    meta._permissionError = `Proceso ${processId} no encontrado.`
-  } else if (!pageEntry) {
-    meta._permissionError = `VPN ${vpn} no existe en la tabla de páginas del proceso ${processId}.`
-  } else if (operation === 'W' && pageEntry.permissions === 'R') {
-    meta._permissionError = `Acceso denegado: VPN ${vpn} es de solo lectura (proceso ${processId}).`
+    meta._segmentFault = `Proceso ${processId} no encontrado.`
+  } else {
+    const segEntry = process.segmentTable.find(s => s.segmentId === segmentId)
+    if (!segEntry) {
+      meta._segmentFault = `Segmento ${segmentId} no existe en el proceso ${processId}.`
+    } else if (pageInSegment >= segEntry.limitPages) {
+      meta._segmentFault = `Violación de segmento: página ${pageInSegment} fuera del límite del segmento "${segEntry.name}" (límite: ${segEntry.limitPages} páginas).`
+    } else if (operation === 'W' && segEntry.permissions === 'R') {
+      meta._segmentEntry = segEntry
+      meta._permissionError = `Acceso denegado: segmento "${segEntry.name}" (S${segmentId}) es de solo lectura.`
+      meta._vpn = segEntry.baseVPN + pageInSegment
+      meta._offset = byteOffset
+    } else {
+      meta._segmentEntry = segEntry
+      meta._vpn = segEntry.baseVPN + pageInSegment
+      meta._offset = byteOffset
+    }
   }
 
-  if (meta._permissionError) {
-    steps.push({ id: 'PERMISSIONS', label: 'Verificar permisos', detail: meta._permissionError, type: 'error' })
+  if (meta._segmentFault) {
+    steps.push({
+      id: 'SEGMENT_CHECK',
+      label: 'Verificar tabla de segmentos',
+      detail: meta._segmentFault,
+      type: 'fault',
+    })
     return { steps, meta }
   }
 
+  if (meta._permissionError) {
+    const seg = meta._segmentEntry
+    steps.push({
+      id: 'SEGMENT_CHECK',
+      label: 'Error de permisos de segmento',
+      detail: `Seg ${segmentId} "${seg.name}" encontrado (VPN abs ${meta._vpn}), pero ${meta._permissionError}`,
+      type: 'error',
+    })
+    return { steps, meta }
+  }
+
+  const seg = meta._segmentEntry
   steps.push({
-    id: 'PERMISSIONS',
-    label: 'Verificar permisos',
-    detail: `VPN ${vpn}: permisos OK (${pageEntry.permissions}${operation === 'W' ? ', escritura permitida' : ''}).`,
+    id: 'SEGMENT_CHECK',
+    label: 'Verificar tabla de segmentos',
+    detail: `Seg ${segmentId} "${seg.name}": base VPN ${seg.baseVPN}, límite ${seg.limitPages}p → VPN absoluta ${meta._vpn}. Permisos: ${seg.permissions}${operation === 'W' ? ' (escritura OK)' : ''}.`,
     type: 'hit',
   })
+
+  const vpn = meta._vpn
 
   // Paso 4 — buscar en TLB
   const tlbEntry = tlb.find(e => e.processId === processId && e.vpn === vpn) ?? null
@@ -103,9 +136,10 @@ export function buildSteps({
       type: 'miss',
     })
 
-    meta._pageValid = pageEntry.valid
+    const pageEntry = process?.pageTable.find(p => p.vpn === vpn)
+    meta._pageValid = pageEntry?.valid ?? false
 
-    if (pageEntry.valid) {
+    if (meta._pageValid) {
       meta._pfn = pageEntry.pfn
       steps.push({
         id: 'PAGE_TABLE',

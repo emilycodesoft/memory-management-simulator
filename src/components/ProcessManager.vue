@@ -10,7 +10,7 @@
       v-if="!store.simulationStarted && store.processes.length < 3"
       class="space-y-2 mb-4 border border-gray-700 rounded p-2"
     >
-      <!-- Nombre -->
+      <!-- Nombre del proceso -->
       <div class="flex items-center gap-2">
         <label class="text-xs text-gray-400 w-16 shrink-0">Nombre</label>
         <input
@@ -23,33 +23,61 @@
         />
       </div>
 
-      <!-- Cantidad de páginas -->
-      <div class="flex items-center gap-2">
-        <label class="text-xs text-gray-400 w-16 shrink-0">Páginas</label>
-        <input
-          type="range" min="1" max="8" step="1"
-          v-model.number="form.pageCount"
-          class="flex-1 accent-blue-500"
-        />
-        <span class="text-xs font-mono w-4 text-right text-blue-300">{{ form.pageCount }}</span>
-      </div>
-
-      <!-- Permisos por página -->
+      <!-- Lista de segmentos -->
       <div>
-        <label class="text-xs text-gray-400 block mb-1">Permisos por página</label>
-        <div class="flex flex-wrap gap-1">
+        <div class="flex items-center justify-between mb-1">
+          <label class="text-xs text-gray-400">Segmentos</label>
           <button
-            v-for="(perm, i) in form.pagePermissions"
-            :key="i"
+            v-if="form.segments.length < 3"
             type="button"
-            @click="togglePermission(i)"
-            class="text-[10px] font-mono px-1.5 py-0.5 rounded transition-colors"
-            :class="perm === 'R'
-              ? 'bg-yellow-900 text-yellow-300 hover:bg-yellow-800'
-              : 'bg-blue-900 text-blue-300 hover:bg-blue-800'"
+            @click="addSegment"
+            class="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+          >+ Agregar segmento</button>
+        </div>
+
+        <div class="space-y-1.5">
+          <div
+            v-for="(seg, i) in form.segments"
+            :key="i"
+            class="border border-gray-700 rounded p-1.5 space-y-1"
           >
-            P{{ i }} {{ perm }}
-          </button>
+            <!-- Cabecera del segmento -->
+            <div class="flex items-center gap-1.5">
+              <span class="text-[10px] font-mono text-gray-500 w-5">S{{ i }}</span>
+              <input
+                v-model="seg.name"
+                type="text"
+                maxlength="12"
+                placeholder="Código"
+                class="flex-1 bg-gray-900 text-[10px] px-1.5 py-0.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-gray-200"
+              />
+              <button
+                v-if="form.segments.length > 1"
+                type="button"
+                @click="removeSegment(i)"
+                class="text-gray-600 hover:text-red-400 text-[10px] px-1 transition-colors"
+              >✕</button>
+            </div>
+
+            <!-- Páginas y permisos -->
+            <div class="flex items-center gap-2 pl-6">
+              <span class="text-[10px] text-gray-500 shrink-0">Págs</span>
+              <input
+                type="range" min="1" max="8" step="1"
+                v-model.number="seg.pageCount"
+                class="flex-1 accent-blue-500"
+              />
+              <span class="text-[10px] font-mono w-4 text-right text-blue-300">{{ seg.pageCount }}</span>
+              <button
+                type="button"
+                @click="seg.permissions = seg.permissions === 'RW' ? 'R' : 'RW'"
+                class="text-[10px] font-mono px-1.5 py-0.5 rounded transition-colors ml-1"
+                :class="seg.permissions === 'R'
+                  ? 'bg-yellow-900 text-yellow-300 hover:bg-yellow-800'
+                  : 'bg-blue-900 text-blue-300 hover:bg-blue-800'"
+              >{{ seg.permissions }}</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -89,17 +117,17 @@
           >✕</button>
         </div>
 
-        <!-- Chips de páginas con permiso -->
+        <!-- Chips de segmentos -->
         <div class="flex flex-wrap gap-1">
           <span
-            v-for="page in proc.pageTable"
-            :key="page.vpn"
+            v-for="seg in proc.segmentTable"
+            :key="seg.segmentId"
             class="text-[10px] font-mono px-1.5 py-0.5 rounded"
-            :class="page.permissions === 'R'
+            :class="seg.permissions === 'R'
               ? 'bg-yellow-900 text-yellow-300'
               : 'bg-blue-900 text-blue-300'"
           >
-            P{{ page.vpn }} {{ page.permissions }}
+            S{{ seg.segmentId }}:{{ seg.name }} {{ seg.limitPages }}p {{ seg.permissions }}
           </span>
         </div>
       </div>
@@ -108,33 +136,33 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import { useSimulatorStore } from '../stores/simulator'
 
 const store = useSimulatorStore()
 
+const defaultSegments = () => [
+  { name: 'Código', pageCount: 2, permissions: 'R'  },
+  { name: 'Datos',  pageCount: 2, permissions: 'RW' },
+]
+
 const form = ref({
   name: '',
-  pageCount: 3,
-  pagePermissions: Array(3).fill('RW'),
+  segments: defaultSegments(),
 })
 
-watch(() => form.value.pageCount, (newCount) => {
-  form.value.pagePermissions = Array.from(
-    { length: newCount },
-    (_, i) => form.value.pagePermissions[i] ?? 'RW',
-  )
-})
+function addSegment() {
+  form.value.segments.push({ name: `Seg${form.value.segments.length}`, pageCount: 2, permissions: 'RW' })
+}
 
-function togglePermission(i) {
-  form.value.pagePermissions[i] = form.value.pagePermissions[i] === 'RW' ? 'R' : 'RW'
+function removeSegment(i) {
+  form.value.segments.splice(i, 1)
 }
 
 function handleAdd() {
   if (!form.value.name.trim()) return
-  store.addProcess(form.value.name.trim(), form.value.pageCount, [...form.value.pagePermissions])
+  store.addProcess(form.value.name.trim(), form.value.segments.map(s => ({ ...s })))
   form.value.name = ''
-  form.value.pageCount = 3
-  form.value.pagePermissions = Array(3).fill('RW')
+  form.value.segments = defaultSegments()
 }
 </script>

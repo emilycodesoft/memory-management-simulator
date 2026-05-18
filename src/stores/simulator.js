@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { makePhysicalMemory, selectVictim } from '../utils/memory'
-import { parseAddress } from '../utils/address'
+import { parseSegmentOffset } from '../utils/address'
 import { buildSteps } from '../utils/stepBuilder'
 
 export const useSimulatorStore = defineStore('simulator', {
@@ -54,6 +54,10 @@ export const useSimulatorStore = defineStore('simulator', {
       _victimProcessId: null,
       _victimDirty: false,
       _snapshots: [],
+      _segmentId: null,
+      _addressInSegment: null,
+      _segmentEntry: null,
+      _segmentFault: null,
     },
   }),
 
@@ -67,6 +71,7 @@ export const useSimulatorStore = defineStore('simulator', {
       const map = {
         CONTEXT_SWITCH: 'instruction',
         PARSE: 'tlb',
+        SEGMENT_CHECK: 'pagetable',
         TLB_LOOKUP: 'tlb', APPLY_HIT: 'tlb', UPDATE_TLB: 'tlb', APPLY_MISS: 'tlb',
         PAGE_TABLE: 'pagetable', PAGE_TABLE_FAULT: 'pagetable',
         CHECK_DISK: 'disk',
@@ -94,11 +99,8 @@ export const useSimulatorStore = defineStore('simulator', {
         return
       }
       if (this.tlb.length >= this.config.tlbSize) {
-        const lruIdx = this.tlb.reduce(
-          (minIdx, e, i) => (e.lastAccessed < this.tlb[minIdx].lastAccessed ? i : minIdx),
-          0,
-        )
-        this.tlb.splice(lruIdx, 1)
+        const times = this.tlb.map(e => e.lastAccessed)
+        this.tlb.splice(times.indexOf(Math.min(...times)), 1)
       }
       this.tlb.push({ vpn, pfn, processId, lastAccessed: this.tick })
     },
@@ -154,8 +156,16 @@ export const useSimulatorStore = defineStore('simulator', {
         case 'PARSE': {
           break
         }
-        case 'PERMISSIONS': {
-          if (s._permissionError) {
+        case 'SEGMENT_CHECK': {
+          if (s._segmentFault) {
+            this.executionLog.push({
+              tick: this.tick, processId: s._processId, virtualAddress: s._virtualAddress,
+              operation: s._operation, vpn: null, offset: null,
+              result: 'SEGMENT_FAULT', frameAssigned: null, victimVpn: null,
+              detail: s._segmentFault,
+            })
+            this.tick++
+          } else if (s._permissionError) {
             this.executionLog.push({
               tick: this.tick, processId: s._processId, virtualAddress: s._virtualAddress,
               operation: s._operation, vpn: s._vpn, offset: s._offset,
@@ -303,14 +313,14 @@ export const useSimulatorStore = defineStore('simulator', {
 
     // Punto de entrada desde el componente — en modo normal llama executeInstruction
     // directamente; en modo stepper pre-computa los pasos sin mutar estado.
-    beginInstruction(processId, virtualAddress, operation) {
+    beginInstruction(processId, segmentId, addressInSegment, operation) {
       if (!this.stepper.active) {
-        this.executeInstruction(processId, virtualAddress, operation)
+        this.executeInstruction(processId, segmentId, addressInSegment, operation)
         return
       }
 
       const { steps, meta } = buildSteps({
-        processId, virtualAddress, operation,
+        processId, segmentId, addressInSegment, operation,
         currentProcessId: this.currentProcessId,
         processes: this.processes,
         tlb: this.tlb,
@@ -354,58 +364,69 @@ export const useSimulatorStore = defineStore('simulator', {
       s.animationKey++
     },
 
-    executeInstruction(processId, virtualAddress, operation) {
+    executeInstruction(processId, segmentId, addressInSegment, operation) {
+      const displayAddress = `S${segmentId}:${addressInSegment}`
+
       // ── Paso 1: context switch ─────────────────────────────────────────
-      // Si cambia el proceso activo, se vacía la TLB completa porque las
-      // traducciones de otro proceso no son válidas para el nuevo contexto.
       if (processId !== this.currentProcessId) {
         this.executionLog.push({
-          tick: this.tick,
-          processId,
-          virtualAddress,
-          operation,
-          vpn: null,
-          offset: null,
-          result: 'CONTEXT_SWITCH',
-          frameAssigned: null,
-          victimVpn: null,
+          tick: this.tick, processId, virtualAddress: displayAddress,
+          operation, vpn: null, offset: null,
+          result: 'CONTEXT_SWITCH', frameAssigned: null, victimVpn: null,
           detail: `Cambio de contexto: proceso ${this.currentProcessId ?? '–'} → proceso ${processId}. TLB vaciada.`,
         })
         this.tlb = []
         this.currentProcessId = processId
       }
 
-      // ── Paso 2: parsear dirección virtual ─────────────────────────────
-      const { vpn, offset } = parseAddress(virtualAddress)
+      // ── Paso 2: parsear offset dentro del segmento ────────────────────
+      const { pageInSegment, byteOffset } = parseSegmentOffset(addressInSegment)
 
-      // ── Paso 3: verificar permisos ─────────────────────────────────────
+      // ── Paso 3: tabla de segmentos ────────────────────────────────────
       const process = this.processes.find(p => p.id === processId)
       if (!process) {
         this.executionLog.push({
-          tick: this.tick, processId, virtualAddress, operation, vpn, offset,
-          result: 'PERMISSION_ERROR', frameAssigned: null, victimVpn: null,
+          tick: this.tick, processId, virtualAddress: displayAddress,
+          operation, vpn: null, offset: null,
+          result: 'SEGMENT_FAULT', frameAssigned: null, victimVpn: null,
           detail: `Proceso ${processId} no encontrado.`,
         })
         this.tick++
         return
       }
 
-      const pageEntry = process.pageTable.find(p => p.vpn === vpn)
-      if (!pageEntry) {
+      const segEntry = process.segmentTable.find(s => s.segmentId === segmentId)
+      if (!segEntry) {
         this.executionLog.push({
-          tick: this.tick, processId, virtualAddress, operation, vpn, offset,
-          result: 'PERMISSION_ERROR', frameAssigned: null, victimVpn: null,
-          detail: `VPN ${vpn} no existe en la tabla de páginas del proceso ${processId}.`,
+          tick: this.tick, processId, virtualAddress: displayAddress,
+          operation, vpn: null, offset: null,
+          result: 'SEGMENT_FAULT', frameAssigned: null, victimVpn: null,
+          detail: `Segmento ${segmentId} no existe en el proceso ${processId}.`,
         })
         this.tick++
         return
       }
 
-      if (operation === 'W' && pageEntry.permissions === 'R') {
+      if (pageInSegment >= segEntry.limitPages) {
         this.executionLog.push({
-          tick: this.tick, processId, virtualAddress, operation, vpn, offset,
+          tick: this.tick, processId, virtualAddress: displayAddress,
+          operation, vpn: null, offset: null,
+          result: 'SEGMENT_FAULT', frameAssigned: null, victimVpn: null,
+          detail: `Violación de segmento: página ${pageInSegment} fuera del límite del segmento "${segEntry.name}" (límite: ${segEntry.limitPages} páginas).`,
+        })
+        this.tick++
+        return
+      }
+
+      const vpn = segEntry.baseVPN + pageInSegment
+      const offset = byteOffset
+
+      if (operation === 'W' && segEntry.permissions === 'R') {
+        this.executionLog.push({
+          tick: this.tick, processId, virtualAddress: displayAddress,
+          operation, vpn, offset,
           result: 'PERMISSION_ERROR', frameAssigned: null, victimVpn: null,
-          detail: `Acceso denegado: página VPN ${vpn} es de solo lectura (proceso ${processId}).`,
+          detail: `Acceso denegado: segmento "${segEntry.name}" (S${segmentId}) es de solo lectura.`,
         })
         this.tick++
         return
@@ -413,66 +434,54 @@ export const useSimulatorStore = defineStore('simulator', {
 
       this.metrics.totalAccesses++
 
+      const pageEntry = process.pageTable.find(p => p.vpn === vpn)
+
       // ── Paso 4: buscar en TLB ──────────────────────────────────────────
       const tlbEntry = this._tlbLookup(processId, vpn)
 
       if (tlbEntry) {
-        // TLB HIT — traducción encontrada en caché, no hay que ir a memoria.
         this.metrics.tlbHits++
         const pfn = tlbEntry.pfn
         tlbEntry.lastAccessed = this.tick
 
-        // Paso 7: actualizar lastAccessed del marco físico
         const frame = this.physicalMemory[pfn]
         frame.lastAccessed = this.tick
 
-        // Paso 8: marcar dirty si es escritura
         if (operation === 'W') {
           pageEntry.dirty = true
           frame.dirty = true
         }
 
-        // Paso 9: registrar en log
         this.executionLog.push({
-          tick: this.tick, processId, virtualAddress, operation, vpn, offset,
-          result: 'TLB_HIT',
-          frameAssigned: pfn,
-          victimVpn: null,
-          detail: `TLB HIT: VPN ${vpn} → marco físico ${pfn}. No se consultó la tabla de páginas.`,
+          tick: this.tick, processId, virtualAddress: displayAddress, operation, vpn, offset,
+          result: 'TLB_HIT', frameAssigned: pfn, victimVpn: null,
+          detail: `TLB HIT: S${segmentId}+p${pageInSegment} → VPN ${vpn} → marco físico ${pfn}.`,
         })
       } else {
-        // TLB MISS — hay que consultar la tabla de páginas.
         this.metrics.tlbMisses++
 
         // ── Paso 5: buscar en tabla de páginas ─────────────────────────
         if (pageEntry.valid) {
-          // La página está en RAM, solo faltaba en el TLB.
           const pfn = pageEntry.pfn
           this._tlbInsert(processId, vpn, pfn)
 
-          // Paso 7
           const frame = this.physicalMemory[pfn]
           frame.lastAccessed = this.tick
 
-          // Paso 8
           if (operation === 'W') {
             pageEntry.dirty = true
             frame.dirty = true
           }
 
-          // Paso 9
           this.executionLog.push({
-            tick: this.tick, processId, virtualAddress, operation, vpn, offset,
-            result: 'TLB_MISS',
-            frameAssigned: pfn,
-            victimVpn: null,
+            tick: this.tick, processId, virtualAddress: displayAddress, operation, vpn, offset,
+            result: 'TLB_MISS', frameAssigned: pfn, victimVpn: null,
             detail: `TLB MISS: VPN ${vpn} en tabla de páginas → marco ${pfn}. Traducción cargada en TLB.`,
           })
         } else {
-          // ── Paso 6: PAGE FAULT — la página no está en RAM ─────────────
+          // ── Paso 6: PAGE FAULT ─────────────────────────────────────────
           this.metrics.pageFaults++
 
-          // Verificar si la página faulteada ya estuvo en RAM y fue enviada al disco.
           const diskIdx = this.disk.findIndex(d => d.processId === processId && d.vpn === vpn)
           const isSwapIn = diskIdx !== -1
 
@@ -482,7 +491,6 @@ export const useSimulatorStore = defineStore('simulator', {
           const freeFrame = this.physicalMemory.find(f => f.processId === null)
 
           if (freeFrame) {
-            // 6b. Hay un marco libre — usarlo directamente.
             pfn = freeFrame.frameId
             freeFrame.processId = processId
             freeFrame.vpn = vpn
@@ -490,12 +498,10 @@ export const useSimulatorStore = defineStore('simulator', {
             freeFrame.loadedAt = this.tick
             freeFrame.lastAccessed = this.tick
           } else {
-            // 6b. Sin marcos libres — elegir víctima según algoritmo.
             const victim = selectVictim(this.physicalMemory, this.config.algorithm)
             victimVpn = victim.vpn
             pfn = victim.frameId
 
-            // Invalidar la víctima en la tabla de páginas de su proceso.
             const victimProcess = this.processes.find(p => p.id === victim.processId)
             if (victimProcess) {
               const victimPage = victimProcess.pageTable.find(p => p.vpn === victim.vpn)
@@ -506,25 +512,20 @@ export const useSimulatorStore = defineStore('simulator', {
               }
             }
 
-            // Enviar la víctima al disco (swap-out).
             const existingDiskIdx = this.disk.findIndex(
               d => d.processId === victim.processId && d.vpn === victim.vpn,
             )
             if (existingDiskIdx !== -1) this.disk.splice(existingDiskIdx, 1)
             this.disk.push({
-              processId: victim.processId,
-              vpn: victim.vpn,
-              dirty: victim.dirty,
-              evictedAt: this.tick,
+              processId: victim.processId, vpn: victim.vpn,
+              dirty: victim.dirty, evictedAt: this.tick,
             })
             this.metrics.swapOuts++
 
-            // Eliminar cualquier entrada TLB de la víctima.
             this.tlb = this.tlb.filter(
               e => !(e.processId === victim.processId && e.vpn === victim.vpn),
             )
 
-            // Reutilizar el marco físico.
             victim.processId = processId
             victim.vpn = vpn
             victim.dirty = false
@@ -532,32 +533,25 @@ export const useSimulatorStore = defineStore('simulator', {
             victim.lastAccessed = this.tick
           }
 
-          // 6c-6d. Actualizar la tabla de páginas del proceso actual.
           pageEntry.valid = true
           pageEntry.pfn = pfn
           pageEntry.dirty = false
 
-          // Remover del disco si era un swap-in.
           if (isSwapIn) {
             this.disk.splice(diskIdx, 1)
             this.metrics.swapIns++
           }
 
-          // 6e. Cargar la nueva traducción en la TLB.
           this._tlbInsert(processId, vpn, pfn)
 
-          // Paso 8: dirty si es escritura
           if (operation === 'W') {
             pageEntry.dirty = true
             this.physicalMemory[pfn].dirty = true
           }
 
-          // Paso 9
           this.executionLog.push({
-            tick: this.tick, processId, virtualAddress, operation, vpn, offset,
-            result: 'PAGE_FAULT',
-            frameAssigned: pfn,
-            victimVpn,
+            tick: this.tick, processId, virtualAddress: displayAddress, operation, vpn, offset,
+            result: 'PAGE_FAULT', frameAssigned: pfn, victimVpn,
             tlbMiss: true, swapIn: isSwapIn, swapOut: victimVpn !== null,
             detail: (() => {
               if (isSwapIn && victimVpn !== null)
@@ -565,17 +559,15 @@ export const useSimulatorStore = defineStore('simulator', {
               if (isSwapIn)
                 return `PAGE FAULT (swap-in): VPN ${vpn} recuperada del disco. Marco libre ${pfn} asignado.`
               if (victimVpn !== null)
-                return `PAGE FAULT (carga inicial): VPN ${vpn} no estaba en RAM ni en disco. Víctima VPN ${victimVpn} desalojada ("swap out") del marco ${pfn}.`
+                return `PAGE FAULT (carga inicial): VPN ${vpn} no estaba en RAM ni en disco. Víctima VPN ${victimVpn} desalojada del marco ${pfn}.`
               return `PAGE FAULT (carga inicial): VPN ${vpn} no estaba en RAM ni en disco. Marco libre ${pfn} asignado.`
             })(),
           })
         }
       }
 
-      // ── Paso 10: incrementar tick ──────────────────────────────────────
+      // ── Paso 10–11 ────────────────────────────────────────────────────
       this.tick++
-
-      // ── Paso 11: recalcular hit rate ───────────────────────────────────
       this._recalcHitRate()
     },
 
@@ -595,6 +587,7 @@ export const useSimulatorStore = defineStore('simulator', {
         active: wasActive, running: false, steps: [], currentIdx: 0, animationKey: 0,
         _snapshots: [],
         _processId: null, _virtualAddress: null, _operation: null,
+        _segmentId: null, _addressInSegment: null, _segmentEntry: null, _segmentFault: null,
         _vpn: null, _offset: null, _isContextSwitch: false, _permissionError: null,
         _tlbHit: false, _pageValid: false, _pfn: null,
         _isSwapIn: false, _diskIdx: -1, _freeFrame: null,
@@ -602,19 +595,36 @@ export const useSimulatorStore = defineStore('simulator', {
       }
     },
 
-    // Crea un proceso con una tabla de páginas vacía (todas las páginas en disco).
-    // permissions puede ser 'R' o 'RW', o un array por página.
-    addProcess(name, pageCount, permissions = 'RW') {
+    // Crea un proceso con tabla de segmentos + tabla de páginas plana.
+    // segments = [{ name, pageCount, permissions }]
+    // Todas las páginas empiezan en disco — demand paging.
+    addProcess(name, segments) {
       const id = this._nextProcessId++
-      const pageTable = Array.from({ length: pageCount }, (_, i) => ({
-        vpn: i,
-        pfn: null,
-        valid: false,
-        permissions: Array.isArray(permissions) ? (permissions[i] ?? 'RW') : permissions,
-        dirty: false,
-      }))
-      this.processes.push({ id, name, pageTable })
-      // Todas las páginas empiezan en disco — demand paging.
+      const segmentTable = []
+      const pageTable = []
+      let baseVPN = 0
+
+      segments.forEach((seg, idx) => {
+        segmentTable.push({
+          segmentId: idx,
+          name: seg.name,
+          baseVPN,
+          limitPages: seg.pageCount,
+          permissions: seg.permissions ?? 'RW',
+        })
+        for (let i = 0; i < seg.pageCount; i++) {
+          pageTable.push({
+            vpn: baseVPN + i,
+            pfn: null,
+            valid: false,
+            permissions: seg.permissions ?? 'RW',
+            dirty: false,
+          })
+        }
+        baseVPN += seg.pageCount
+      })
+
+      this.processes.push({ id, name, segmentTable, pageTable })
       pageTable.forEach(page => {
         this.disk.push({ processId: id, vpn: page.vpn, dirty: false, evictedAt: this.tick, initial: true })
       })

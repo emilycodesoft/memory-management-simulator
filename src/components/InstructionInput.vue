@@ -24,15 +24,32 @@
         </select>
       </div>
 
-      <!-- Dirección virtual en hex -->
+      <!-- Selección de segmento -->
       <div class="flex items-center gap-2">
-        <label class="text-xs text-gray-400 w-16 shrink-0">Dirección</label>
+        <label class="text-xs text-gray-400 w-16 shrink-0">Segmento</label>
+        <select
+          v-model="selectedSegmentId"
+          class="flex-1 bg-gray-800 text-xs px-2 py-1 rounded border border-gray-700 focus:border-blue-500 outline-none text-gray-200"
+        >
+          <option
+            v-for="seg in selectedProcess?.segmentTable ?? []"
+            :key="seg.segmentId"
+            :value="seg.segmentId"
+          >
+            S{{ seg.segmentId }}: {{ seg.name }} ({{ seg.limitPages }}p {{ seg.permissions }})
+          </option>
+        </select>
+      </div>
+
+      <!-- Dirección dentro del segmento (offset en hex) -->
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-gray-400 w-16 shrink-0">Offset</label>
         <div class="flex-1 relative">
           <span class="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 pointer-events-none">0x</span>
           <input
             v-model="rawAddress"
             type="text"
-            placeholder="3A4F"
+            placeholder="1A4F"
             maxlength="6"
             @input="onAddressInput"
             class="w-full bg-gray-800 text-xs pl-7 pr-2 py-1 rounded border outline-none text-gray-200 font-mono uppercase"
@@ -45,7 +62,7 @@
       <div class="pl-[72px] -mt-1 text-[10px] font-mono">
         <p v-if="addressError" class="text-red-400">{{ addressError }}</p>
         <p v-else-if="addressHint" class="text-gray-500">{{ addressHint }}</p>
-        <p v-else class="text-gray-600">Hex de hasta 6 dígitos, ej: 3A4F → VPN 3, offset 0xA4F</p>
+        <p v-else class="text-gray-600">Offset hex dentro del segmento, ej: 1A4F → pág 1, offset 0xA4F</p>
       </div>
 
       <!-- Selector de operación -->
@@ -124,38 +141,59 @@ import { RESULT_CONFIG } from '../constants'
 const store = useSimulatorStore()
 
 const selectedProcessId = ref(store.processes[0]?.id ?? null)
+const selectedSegmentId = ref(0)
 const rawAddress = ref('')
 const operation = ref('R')
 const addressError = ref('')
+
+const selectedProcess = computed(() =>
+  store.processes.find(p => p.id === selectedProcessId.value) ?? null
+)
+
+const selectedSegment = computed(() =>
+  selectedProcess.value?.segmentTable.find(s => s.segmentId === selectedSegmentId.value) ?? null
+)
+
+// Cuando cambia el proceso, resetear al primer segmento
+watch(selectedProcessId, () => {
+  selectedSegmentId.value = 0
+  rawAddress.value = ''
+  addressError.value = ''
+})
+
+// Cuando cambia el segmento, revalidar la dirección actual
+watch(selectedSegmentId, () => {
+  addressError.value = rawAddress.value ? validateAddress(rawAddress.value) : ''
+})
 
 // Keep selectedProcessId valid when processes list changes
 watch(() => store.processes, (procs) => {
   if (!procs.find(p => p.id === selectedProcessId.value)) {
     selectedProcessId.value = procs[0]?.id ?? null
+    selectedSegmentId.value = 0
   }
 }, { deep: false })
 
-function validateAddress(hex, process) {
+function validateAddress(hex) {
   if (!hex) return 'Ingresa una dirección.'
   const addr = parseInt(hex, 16)
   if (isNaN(addr)) return 'Dirección inválida.'
-  const vpn = addr >>> 12
-  if (!process) return ''
-  if (!process.pageTable.find(p => p.vpn === vpn))
-    return `VPN ${vpn} no existe en este proceso (páginas 0–${process.pageTable.length - 1}).`
+  const seg = selectedSegment.value
+  if (!seg) return ''
+  const pageInSeg = addr >>> 12
+  if (pageInSeg >= seg.limitPages)
+    return `Página ${pageInSeg} fuera del límite (segmento tiene ${seg.limitPages} páginas: 0–${seg.limitPages - 1}).`
   return ''
 }
 
 function onAddressInput() {
   rawAddress.value = rawAddress.value.replace(/[^0-9a-fA-F]/g, '').toUpperCase()
-  const process = store.processes.find(p => p.id === selectedProcessId.value)
-  addressError.value = rawAddress.value ? validateAddress(rawAddress.value, process) : ''
+  addressError.value = rawAddress.value ? validateAddress(rawAddress.value) : ''
 }
 
 function handleExecute() {
   if (addressError.value || !rawAddress.value.trim() || store.stepper.running) return
-  store.beginInstruction(selectedProcessId.value, '0x' + rawAddress.value, operation.value)
-  // En modo directo (sin stepper) la instrucción ya terminó — hacer scroll de vuelta aquí
+  store.beginInstruction(selectedProcessId.value, selectedSegmentId.value, '0x' + rawAddress.value, operation.value)
   if (!store.stepper.active) {
     nextTick(() => {
       document.getElementById('section-instruction')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -163,16 +201,18 @@ function handleExecute() {
   }
 }
 
-// Muestra el desglose VPN + offset mientras el usuario escribe
+// Desglose en tiempo real mientras el usuario escribe
 const addressHint = computed(() => {
   if (!rawAddress.value || addressError.value) return ''
   const addr = parseInt(rawAddress.value, 16)
-  const vpn = addr >>> 12
-  const offset = addr & 0xFFF
-  return `VPN ${vpn}  |  offset 0x${offset.toString(16).toUpperCase().padStart(3, '0')}`
+  const pageInSeg = addr >>> 12
+  const byteOffset = addr & 0xFFF
+  const seg = selectedSegment.value
+  const absVpn = seg ? seg.baseVPN + pageInSeg : '?'
+  return `Pág en seg: ${pageInSeg}  |  offset: 0x${byteOffset.toString(16).toUpperCase().padStart(3, '0')}  |  VPN abs: ${absVpn}`
 })
 
-// Último resultado que no sea CONTEXT_SWITCH (para el resumen visual)
+// Último resultado que no sea CONTEXT_SWITCH
 const lastEntry = computed(() => {
   for (let i = store.executionLog.length - 1; i >= 0; i--) {
     if (store.executionLog[i].result !== 'CONTEXT_SWITCH') return store.executionLog[i]

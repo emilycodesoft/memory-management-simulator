@@ -1,4 +1,4 @@
-# Simulador de Gestión de Memoria con Paginación y TLB
+# Simulador de Gestión de Memoria con Paginación y Segmentación
 
 ## Contexto del proyecto
 
@@ -27,6 +27,59 @@ El simulador es **educativo y visual**: el usuario ejecuta instrucciones de memo
 
 ### Ítem adicional (propuesto por el equipo)
 5. Simulación del **TLB** con métricas de hit rate, miss rate y penalización por miss
+
+---
+
+## Modelo de segmentación paginada
+
+Cada proceso tiene dos tablas:
+
+1. **Tabla de segmentos** — define las regiones lógicas del proceso:
+   ```
+   [{ segmentId, name, baseVPN, limitPages, permissions }]
+   ```
+   - `baseVPN`: VPN absoluta donde comienza el segmento en la tabla de páginas plana
+   - `limitPages`: tamaño del segmento en páginas (bounds check)
+
+2. **Tabla de páginas** (plana) — mapea VPNs absolutas a frames físicos:
+   ```
+   [{ vpn, pfn, valid, permissions, dirty }]
+   ```
+   Cada página hereda `permissions` de su segmento.
+
+### Resolución de dirección (dos fases)
+
+```
+dirección virtual = S{segmentId} : 0x{offsetEnSegmento}
+
+Fase 1 — Tabla de segmentos:
+  pageInSegment = offsetEnSegmento >> 12
+  byteOffset    = offsetEnSegmento & 0xFFF
+  segEntry = segmentTable.find(s => s.segmentId === segmentId)
+  ¿pageInSegment >= limitPages? → SEGMENT_FAULT
+  ¿W y permissions === 'R'?    → PERMISSION_ERROR
+  vpn = segEntry.baseVPN + pageInSegment   ← VPN absoluta
+
+Fase 2 — Tabla de páginas / TLB:
+  → flujo TLB → page table → page fault (igual que antes, con vpn absoluta)
+```
+
+### API del store con segmentación
+
+```js
+addProcess(name, segments)
+// segments = [{ name, pageCount, permissions }]
+// Construye segmentTable y pageTable plana automáticamente
+
+executeInstruction(processId, segmentId, addressInSegment, operation)
+beginInstruction(processId, segmentId, addressInSegment, operation)
+// addressInSegment: hex string del offset dentro del segmento, ej. '0x1A4F'
+```
+
+### Nuevo resultado en log: SEGMENT_FAULT
+
+Cubre: segmento no existe, página fuera de bounds, escritura en segmento R.
+Color: naranja (diferente de PAGE_FAULT rojo y PERMISSION_ERROR rojo oscuro).
 
 ---
 
