@@ -4,6 +4,7 @@
       Simulador de Gestión de Memoria — SO
     </h1>
 
+    <PanelAyuda />
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4">
       
       <!-- Columna Izquierda: Nivel de Aplicación y Métricas -->
@@ -156,6 +157,7 @@ import ExecutionLog from './components/ExecutionLog.vue'
 import DiskView from './components/DiskView.vue'
 import StepPanel from './components/StepPanel.vue'
 import StepIsland from './components/StepIsland.vue'
+import PanelAyuda from './components/PanelAyuda.vue'
 
 watch(() => store.activeSubsystem, (subsystem) => {
   if (!subsystem) return
