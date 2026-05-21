@@ -32,40 +32,62 @@
 
         <!-- CAJA -->
         <div
-          class="bg-gray-900 w-[700px] max-h-[85vh] overflow-y-auto rounded-2xl border border-gray-700 shadow-2xl p-6"
+          class="bg-gray-900 w-[1000px] max-h-[85vh] overflow-y-auto rounded-2xl border border-gray-1000 shadow-2xl p-6"
         >
 
           <!-- HEADER -->
-          <div class="flex justify-between items-center mb-6">
+          <div class="flex flex-col gap-2 mb-6 border-b border-gray-700 pb-4">
+
+            <button
+                @click="toggleHelp"
+                class="text-gray-400 hover:text-white text-2xl"
+              >
+                ✕
+              </button>
 
             <h1 class="text-2xl font-bold text-blue-400">
                 Panel de información
             </h1>
 
-            <button
-              @click="toggleHelp"
-              class="text-gray-400 hover:text-white text-2xl"
-            >
-              ✕
-            </button>
+            
+            <h2 class="text-gray-300 text-sm">
+              Esta herramienta es un simulador de gestión de memoria para sistemas operativos, diseñado para ayudar a los estudiantes a comprender los conceptos fundamentales de la memoria virtual, paginación, segmentación y algoritmos de reemplazo de páginas.
+            </h2>  
 
           </div>
 
           <!-- CONTENIDO -->
           <div class="flex flex-col gap-4">
 
-            <section>
 
-              <h2 class="text-lg font-bold text-violet-400 mb-2">
-                ¿Cómo usar el simulador?
-              </h2>
+              <button
+                @click="toggleSection('Guia')"
+                class="w-full text-left px-4 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 rounded-t-lg focus:outline-none"
+              >
+                <span class="font-bold text-violet-400">
+                  Guía del simulador
+                </span>
 
-              <p class="text-gray-300">
-                1. selecciona el modo de gestión de memoria <br>
-                2. Antes de iniciar la simulación define el número de marcos fisicos, tamaño del TLB, algoritmo de reemplazo, penalización por TLB miss y penalización por page fault.
-              </p>
+                <span>
+                  {{ openSection === 'Guia' ? '<' : '>' }}
+                </span>
 
-            </section>
+              </button>
+
+              <div 
+                v-if="openSection === 'Guia'"
+                class="bg-gray-800 rounded-lg border border-gray-700 p-4 text-gray-300">
+                1. Elige la configuración: número de marcos fisicos, entrada TLB, algoritmo de reemplazo, número de penalizaciones TLB miss y page faults. <br>
+                2. Agregue los procesos necesarios y los segmentos requeridos para cada proceso con su numero de páginas. <br>
+                3. Pulsa iniciar simulación. <br>
+                4. Elija el proceso, el segmento a ejecutar, la dirección de memoria en hexadecimal y los permisos de lectura o escritura. <br>
+                5. Observe los resultados en el nivel de hardware, las métricas de rendimiento y el panel de pasos. <br>
+                6. Repita el paso 4 para ejecutar otro proceso o pulse reiniciar simulación para comenzar de nuevo. <br><br>
+
+                Recomendaciones: Activa el modo paso a paso para ver cada instrucción.
+
+              </div>
+
 
             <div class="bg-gray-800 rounded-lg border border-gray-700">
 
