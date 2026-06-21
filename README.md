@@ -1,150 +1,107 @@
-# Simulador de Gestión de Memoria con Paginación y TLB
+# Memory Management Simulator
 
-Proyecto final — **Sistemas Operativos**, Ingeniería de Sistemas  
-Universidad Tecnológica de Pereira
+An interactive web simulator for operating-system memory management. You create processes, run memory instructions step by step, and watch the segment tables, page tables, physical frames, TLB and metrics update in real time.
 
-Herramienta web interactiva que simula la gestión de memoria de un sistema operativo: paginación, algoritmos de reemplazo de páginas (FIFO / LRU), manejo de page faults y TLB (Translation Lookaside Buffer).
-
----
-
-## Características
-
-- **Paginación con tabla de páginas por proceso** — páginas de 4 KB fijas, offset de 12 bits
-- **TLB** con política de reemplazo LRU y métricas en tiempo real (hit rate, miss rate, penalizaciones)
-- **Algoritmos de reemplazo de páginas:** FIFO y LRU, configurable antes de iniciar
-- **Manejo de page faults** simulado con descarga a disco (dirty bit) y log descriptivo
-- **Permisos por página** (R / RW) con detección de escritura en páginas de solo lectura
-- **Context switch** con flush automático del TLB al cambiar de proceso
-- **Log de ejecución** paso a paso con colores por tipo de evento
-- **Métricas acumuladas:** TLB hits, misses, page faults, accesos totales, hit rate
+Final project for the **Operating Systems** course — Systems Engineering, Universidad Tecnológica de Pereira.
 
 ---
 
-## Stack tecnológico
+## What it simulates
 
-| Herramienta | Versión | Rol |
-|---|---|---|
-| Vue 3 (Composition API) | ^3.5 | Framework UI |
-| Pinia | ^3.0 | Estado global |
-| Tailwind CSS | ^4.2 | Estilos |
-| Vite | ^8.0 | Bundler / dev server |
-| Vitest | ^4.1 | Tests unitarios |
+- **Segmented paging** — each process has a segment table (its logical regions) mapped onto a flat page table; address translation runs in two phases (segment → page).
+- **Paging** with fixed 4 KB pages (12-bit offset)
+- **TLB** (Translation Lookaside Buffer) with its own LRU replacement and real-time hit/miss metrics
+- **Page replacement algorithms** — FIFO and LRU, selectable before running
+- **Page faults** with victim selection and dirty-bit write-back to "disk"
+- **Permissions** per segment/page (R / RW): writing to a read-only page raises a permission error; an out-of-bounds access or a write to a read-only segment raises a segment fault
+- **Context switch** flushes the TLB when the active process changes
+- **Step-by-step execution log**, color-coded by event type
+- **Accumulated metrics** — TLB hits/misses, page faults, total accesses, hit rate
 
 ---
 
-## Instalación y uso
+## Address translation (two phases)
+
+```
+virtual address = S{segmentId} : {offsetInSegment}
+
+Phase 1 — segment table
+  pageInSegment = offset >> 12
+  pageInSegment ≥ limitPages?     → SEGMENT_FAULT
+  write to a read-only segment?   → PERMISSION_ERROR
+  vpn = segment.baseVPN + pageInSegment        (absolute VPN)
+
+Phase 2 — TLB → page table → page fault
+  TLB hit   → frame number directly
+  TLB miss  → look up the page table
+  invalid   → PAGE FAULT → assign a free frame, or evict a victim
+              (FIFO = oldest loaded, LRU = least recently used;
+               write the victim back first if it's dirty)
+```
+
+Each instruction advances the system tick, which doubles as the timestamp for FIFO (`loadedAt`) and LRU (`lastAccessed`).
+
+---
+
+## Tech stack
+
+- **Vue 3** (Composition API) — single-page UI, no router
+- **Pinia** — global state and all simulation logic (`stores/simulator.js`)
+- **Tailwind CSS v4**
+- **Vite** — dev server and build
+- **Vitest** — unit tests
+
+---
+
+## Running locally
 
 ```bash
-# Instalar dependencias
 npm install
-
-# Servidor de desarrollo
-npm run dev
-
-# Build de producción
-npm run build
-
-# Ejecutar tests unitarios
-npm run test
-
-# Tests en modo watch
-npm run test:watch
+npm run dev          # dev server
+npm run build        # production build
+npm run test         # run unit tests
+npm run test:watch   # tests in watch mode
 ```
 
 ---
 
-## Cómo usar el simulador
+## How to use it
 
-1. **Configurar** — en el panel superior izquierdo, definir número de marcos físicos, tamaño del TLB, algoritmo de reemplazo y penalizaciones. La configuración solo puede cambiarse antes de ejecutar instrucciones.
-
-2. **Agregar procesos** — en el panel de gestión de procesos, crear uno o más procesos indicando cuántas páginas tiene y si cada página es de solo lectura (R) o lectura/escritura (RW).
-
-3. **Ejecutar instrucciones** — seleccionar un proceso, ingresar una dirección virtual en hexadecimal (ej. `0x3A4F`) y elegir operación (R / W). Cada instrucción avanza el tick del sistema.
-
-4. **Observar el estado** — los paneles se actualizan en tiempo real:
-   - **Memoria física:** grilla de marcos con su contenido actual
-   - **Tabla de páginas:** estado de cada página del proceso seleccionado
-   - **TLB:** entradas activas con VPN → PFN
-   - **Métricas:** hit rate y contadores acumulados
-   - **Log:** historial completo con resultado de cada instrucción
-
----
-
-## Estructura del proyecto
-
-```
-src/
-├── stores/
-│   ├── simulator.js              # Store Pinia — toda la lógica de simulación
-│   └── __tests__/
-│       └── simulator.test.js     # Tests unitarios del store
-└── components/
-    ├── ConfigPanel.vue           # Configuración inicial del sistema
-    ├── ProcessManager.vue        # Crear y eliminar procesos
-    ├── InstructionInput.vue      # Ingreso de instrucciones de memoria
-    ├── MetricsPanel.vue          # Contadores y hit rate en tiempo real
-    ├── PhysicalMemoryView.vue    # Grilla de marcos físicos
-    ├── PageTableView.vue         # Tabla de páginas del proceso activo
-    ├── TLBView.vue               # Entradas actuales del TLB
-    └── ExecutionLog.vue          # Historial de instrucciones ejecutadas
-```
-
----
-
-## Lógica de simulación
-
-Cada llamada a `executeInstruction(processId, virtualAddress, operation)` sigue este flujo:
-
-```
-Dirección virtual (hex)
-        │
-        ▼
-┌───────────────────┐
-│  Context switch?  │ ──→ Flush TLB si cambia el proceso activo
-└───────────────────┘
-        │
-        ▼
-┌───────────────────┐
-│ Verificar permisos│ ──→ PERMISSION_ERROR si W en página R
-└───────────────────┘
-        │
-        ▼
-┌───────────────────┐
-│   Buscar en TLB   │ ──→ TLB_HIT: obtener PFN directo
-└───────────────────┘
-        │ miss
-        ▼
-┌───────────────────┐
-│ Buscar page table │ ──→ valid=true: TLB_MISS + cargar en TLB
-└───────────────────┘
-        │ invalid
-        ▼
-┌───────────────────┐
-│  PAGE FAULT       │ ──→ Asignar/reemplazar marco (FIFO o LRU)
-│  Cargar página    │     Escribir víctima si dirty
-└───────────────────┘
-        │
-        ▼
-   Actualizar dirty, lastAccessed, métricas, log, tick
-```
+1. **Configure** the system (physical frames, TLB size, replacement algorithm, penalties). Configuration is locked once you start executing instructions.
+2. **Add processes**, defining each one's segments — page count and permissions (R / RW) per segment.
+3. **Execute instructions**: pick a process, enter a virtual address (segment + offset) and an operation (R / W). Each instruction advances one tick.
+4. **Watch the state** update live: physical memory grid, the active process's segment and page tables, the TLB, the metrics panel, and the execution log.
 
 ---
 
 ## Tests
 
-Los tests unitarios en `src/stores/__tests__/simulator.test.js` cubren:
-
-- TLB hit y miss
-- Resolución de page fault con asignación de marco libre
-- Reemplazo FIFO y LRU cuando la memoria está llena
-- Detección de error de permisos
-- Context switch con flush del TLB
+Unit tests in `src/stores/__tests__/simulator.test.js` cover TLB hit/miss, page-fault resolution with free-frame assignment, FIFO and LRU replacement when memory is full, permission errors, context-switch TLB flush, and segment-level translation.
 
 ---
 
-## División de trabajo
+## Project structure
 
-| Módulo | Integrante | Archivos |
-|---|---|---|
-| A — Lógica central | Emily | `stores/simulator.js`, `TLBView.vue`, `MetricsPanel.vue`, `ExecutionLog.vue` |
-| B — UI e interacción | Compañera | `ConfigPanel.vue`, `ProcessManager.vue`, `InstructionInput.vue`, `PhysicalMemoryView.vue`, `PageTableView.vue` |
+```
+src/
+├── stores/
+│   ├── simulator.js              # Pinia store — all simulation logic
+│   └── __tests__/simulator.test.js
+├── utils/                        # address parsing, step building
+├── constants/                    # shared constants
+└── components/
+    ├── ConfigPanel.vue           # initial system configuration
+    ├── ProcessManager.vue        # create/remove processes and segments
+    ├── InstructionInput.vue      # enter memory instructions
+    ├── MetricsPanel.vue          # live counters and hit rate
+    ├── PhysicalMemoryView.vue    # physical frame grid
+    ├── PageTableView.vue         # active process's page table
+    ├── TLBView.vue               # current TLB entries
+    └── ExecutionLog.vue          # step-by-step history
+```
+
+---
+
+## Team
+
+University group project. Core simulation logic and the TLB / metrics / log views were built by **Emily Perea**; the configuration, process-management and memory-visualization UI by a teammate.
