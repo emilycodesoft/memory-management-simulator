@@ -1,8 +1,11 @@
 <template>
   <div class="min-h-screen bg-gray-950 text-gray-100 p-4 font-mono">
-    <h1 class="text-center text-2xl font-bold mb-6 text-blue-400">
-      Simulador de Gestión de Memoria — SO
-    </h1>
+    <header class="flex items-center justify-center gap-3 mb-6">
+      <img src="/favicon.svg" alt="Logo" class="w-9 h-9" />
+      <h1 class="text-2xl font-bold text-blue-400">
+        Simulador de Gestión de Memoria — SO
+      </h1>
+    </header>
 
     <PanelAyuda />
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4">
